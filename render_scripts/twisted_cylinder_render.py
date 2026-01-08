@@ -31,13 +31,12 @@ from render_meshes_bt import (
     get_color_for_method,
     load_mesh_with_fallback,
 )
-from setMat_metal_wrapper import setMat_metal_wrapper
+from setMat_doubleColorWire import setMat_doubleColorWire
 from setLight_sun_with_strength import setLight_sun_with_strength
-from setup_world import setup_world, get_blender_hdri
 
-def parse_crush_can_arguments():
+def parse_twisted_cylinder_arguments():
     """Parse command line arguments with video export option."""
-    parser = argparse.ArgumentParser(description='Render crush can meshes using BlenderToolbox')
+    parser = argparse.ArgumentParser(description='Render twisted cylinder meshes using BlenderToolbox')
     parser.add_argument('-i', '--input-folder', type=str, required=True,
                         help='Folder containing PLY/OBJ files')
     parser.add_argument('-o', '--output-folder', type=str, required=True,
@@ -91,7 +90,7 @@ def main():
     # ========================================
     # Parse arguments
     # ========================================
-    args = parse_crush_can_arguments()
+    args = parse_twisted_cylinder_arguments()
     
     input_folder = Path(args.input_folder)
     output_folder = Path(args.output_folder)
@@ -126,10 +125,6 @@ def main():
     
     print(f"Method name: {method_name}, Object color: {obj_color}")
 
-    # ========================================
-    # World settings (auto-detect Blender HDRI)
-    # ========================================
-    world_path = get_blender_hdri("forest")  # Options: forest, city, courtyard, interior, night, studio, sunrise, sunset
     
     # Mesh transform
     mesh_location = (0, 0, 0)
@@ -140,11 +135,10 @@ def main():
     # Print settings
     # ========================================
     print("\n" + "=" * 50)
-    print("Crush Can Renderer")
+    print("Twisted Cylinder Renderer")
     print("=" * 50)
     print(f"Input: {input_folder}")
     print(f"Output: {output_folder}")
-    print(f"World: {world_path}")
     print(f"Resolution: {resolution_x}x{resolution_y}")
     print(f"Samples: {samples}, Exposure: {exposure}")
     print(f"Mesh color: {obj_color} (custom)")
@@ -180,8 +174,8 @@ def main():
     
     global_min = [float('inf')] * 3
     global_max = [float('-inf')] * 3
-    tmp_dir = output_folder / '_tmp_converted'
     
+    tmp_dir = output_folder / '_tmp_converted'
     for i, mesh_file in enumerate(mesh_files):
         print(f"  [{i+1}/{len(mesh_files)}] Loading: {mesh_file.name}")
         mesh = load_mesh_with_fallback(bt, mesh_file, mesh_location, mesh_rotation, mesh_scale, tmp_dir)
@@ -202,6 +196,7 @@ def main():
     combined_center = tuple((global_min[i] + global_max[i]) / 2 for i in range(3))
     combined_size = tuple(global_max[i] - global_min[i] for i in range(3))
     max_dim = max(combined_size)
+    ground_z = global_min[2]
     
     print(f"\n  Combined bounding box:")
     print(f"    Center: {tuple(f'{x:.3f}' for x in combined_center)}")
@@ -235,6 +230,9 @@ def main():
     
     # Material color (custom, not from args)
     print(f"  Material color: {obj_color}")
+    meshColor_top = bt.colorObj(obj_color, 0.5, 1.0, 1.0, 0.0, 0.0)
+    meshColor_bottom = bt.colorObj(obj_color, 0.5, 1.0, 1.0, 0.0, 0.0)
+    ao_strength = 0.5
     
     # ========================================
     # PASS 2: Render each mesh
@@ -263,13 +261,11 @@ def main():
         else:
             bpy.ops.object.shade_smooth()
         
+        # subdivide the mesh
+        bt.subdivision(mesh, level = 2)
+        
         # Material
-        metal_val = 1.0
-        roughness_val = 0.3
-        setMat_metal_wrapper(mesh, obj_color, metal_val, roughness_val)
-
-        setup_world(world_path=world_path, world_name="World", strength=1.0, make_film_transparent=True, use_existing_world=True, set_as_scene_world=True)
-    
+        setMat_doubleColorWire(mesh, meshColor_top, meshColor_bottom, AOStrength=ao_strength)
         
         # Camera (fixed position and rotation using direct Blender API)
         bpy.ops.object.camera_add(location=camera_location)
@@ -282,7 +278,7 @@ def main():
         # bt.invisibleGround(shadowBrightness=0.9, location=(0, 0, ground_z))
 
         # Sun light
-        # sun_light = setLight_sun_with_strength(light_rotation, light_strength, shadow_softness)
+        sun_light = setLight_sun_with_strength(light_rotation, light_strength, shadow_softness)
 
         bt.setLight_ambient(color=(0.1, 0.1, 0.1, 1))
         bt.shadowThreshold(alphaThreshold=0.05, interpolationMode='CARDINAL')

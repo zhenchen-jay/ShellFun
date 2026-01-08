@@ -72,6 +72,145 @@ def natural_sort_key(path):
     parts = re.split(r'(\d+)', name)
     return [int(part) if part.isdigit() else part.lower() for part in parts]
 
+# ============================================================
+# Mesh conversion utilities (for problematic PLY files)
+# ============================================================
+
+def convert_ply_to_obj_pymeshlab(ply_path, obj_path=None):
+    """
+    Convert a PLY file to OBJ using PyMeshLab.
+    
+    This is useful for PLY files that Blender can't import directly
+    (e.g., "Invalid face size" errors).
+    
+    Args:
+        ply_path: Path to the input PLY file
+        obj_path: Path for the output OBJ file. If None, uses same name with .obj extension
+    
+    Returns:
+        Path to the OBJ file, or None if conversion failed
+    """
+    try:
+        import pymeshlab
+    except ImportError:
+        print("  ERROR: pymeshlab not installed. Install with: pip install pymeshlab")
+        return None
+    
+    ply_path = Path(ply_path)
+    if obj_path is None:
+        obj_path = ply_path.with_suffix('.obj')
+    else:
+        obj_path = Path(obj_path)
+    
+    try:
+        ms = pymeshlab.MeshSet()
+        ms.load_new_mesh(str(ply_path))
+        ms.save_current_mesh(str(obj_path))
+        return obj_path
+    except Exception as e:
+        print(f"  ERROR converting {ply_path.name} with pymeshlab: {e}")
+        return None
+
+
+def load_mesh_with_fallback(bt, mesh_file, location, rotation, scale, tmp_dir=None):
+    """
+    Load a mesh file with Blender, falling back to PyMeshLab conversion if needed.
+    
+    Args:
+        bt: BlenderToolbox module
+        mesh_file: Path to the mesh file (PLY or OBJ)
+        location: Mesh location tuple
+        rotation: Mesh rotation tuple (degrees)
+        scale: Mesh scale tuple
+        tmp_dir: Directory for temporary converted files. If None, uses mesh_file's directory
+    
+    Returns:
+        Loaded mesh object, or None if loading failed
+    """
+    import bpy
+    
+    mesh_file = Path(mesh_file)
+    
+    # First, try loading directly
+    try:
+        mesh = bt.readMesh(str(mesh_file), location, rotation, scale)
+        return mesh
+    except Exception as e:
+        pass
+    
+    # Check if Blender reported an error (bt.readMesh might not raise exception)
+    # We'll check if the mesh was actually loaded
+    if bpy.context.object is None or bpy.context.object.type != 'MESH':
+        # Loading failed, try PyMeshLab conversion for PLY files
+        if mesh_file.suffix.lower() == '.ply':
+            print(f"    Blender failed to load {mesh_file.name}, trying PyMeshLab conversion...")
+            
+            # Determine temp directory
+            if tmp_dir is None:
+                tmp_dir = mesh_file.parent / '_tmp_converted'
+            tmp_dir = Path(tmp_dir)
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Convert to OBJ
+            obj_path = tmp_dir / f"{mesh_file.stem}.obj"
+            converted = convert_ply_to_obj_pymeshlab(mesh_file, obj_path)
+            
+            if converted:
+                try:
+                    mesh = bt.readMesh(str(converted), location, rotation, scale)
+                    print(f"    ✓ Loaded via PyMeshLab conversion")
+                    return mesh
+                except Exception as e:
+                    print(f"    ERROR loading converted OBJ: {e}")
+                    return None
+            else:
+                return None
+    
+    return bpy.context.object if bpy.context.object and bpy.context.object.type == 'MESH' else None
+
+# ============================================================
+# color maps from method prefix to rgba
+# Keys are matched as prefixes, so "Directional_StVK_Bending_Tan" matches 
+# "Directional_StVK_Bending_Tan_RestFlat", "Directional_StVK_Bending_Tan_v2", etc.
+color_maps = {
+    "Directional_StVK_Bending_Angle": (0.226, 0.358, 0.67, 1.0),
+    "Directional_StVK_Bending_Sin": (0.6, 0.6, 0.4, 1.0),
+    "Directional_StVK_Bending_Tan": (0.2, 0.4, 0.4, 1.0),
+    "Discrete_Hinge_Bending_Tan": (0.3, 0.178, 0.5, 1.0),
+    "StVK_Bending_Tan": (0.3, 0.3, 0.3, 1.0),
+    "StVK_Bending_Sin": (0.2, 0.2, 0.2, 1.0),
+    "Vertex_Based_Quadratic_Bending_Tan": (0.7, 0.1, 0, 1.0),
+}
+
+def get_color_for_method(method_name, default_color=(0.2, 0.4, 0.4, 1.0)):
+    """
+    Get color for a method name, supporting prefix matching.
+    
+    First tries exact match, then tries prefix matching (longest prefix wins).
+    
+    Args:
+        method_name: The folder/method name to look up
+        default_color: Color to use if no match found
+    
+    Returns:
+        RGBA tuple for the color
+    """
+    # Exact match first
+    if method_name in color_maps:
+        return color_maps[method_name]
+    
+    # Prefix match - find longest matching prefix
+    best_match = None
+    best_len = 0
+    for prefix in color_maps:
+        if method_name.startswith(prefix) and len(prefix) > best_len:
+            best_match = prefix
+            best_len = len(prefix)
+    
+    if best_match:
+        return color_maps[best_match]
+    
+    return default_color
 
 def convert_png_to_jpg(png_file, jpg_file):
     """
@@ -182,17 +321,32 @@ def create_video(image_files, output_video, fps=30):
         return None
     
     try:
-        from moviepy.editor import ImageSequenceClip
+        # moviepy 2.x
+        from moviepy import ImageSequenceClip
     except ImportError:
-        print("  ERROR: moviepy not installed. Install with: pip install moviepy")
-        return None
+        try:
+            # moviepy 1.x
+            from moviepy.editor import ImageSequenceClip
+        except ImportError:
+            print("  ERROR: moviepy not installed. Install with: pip install moviepy")
+            return None
     
     # Convert paths to strings
     image_files_str = [str(f) for f in image_files]
     
     try:
         clip = ImageSequenceClip(image_files_str, fps=fps)
-        clip.write_videofile(str(output_video), codec='libx264', logger=None)
+        # Use yuv420p pixel format for Windows compatibility (default yuv444p is not widely supported)
+        # Also pad to even dimensions (required for yuv420p)
+        clip.write_videofile(
+            str(output_video), 
+            codec='libx264',
+            ffmpeg_params=[
+                "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
+                "-pix_fmt", "yuv420p"
+            ],
+            logger=None
+        )
         print(f"  ✓ Video saved: {output_video}")
         return Path(output_video)
     except Exception as e:
