@@ -1,12 +1,12 @@
 """
-Custom render script for twisted cylinder simulation using BlenderToolbox.
+Custom render script for crash ball simulation using BlenderToolbox.
 
 Uses utility functions from render_meshes_bt.py
 
 Usage:
-    python twisted_cylinder_render.py -- -i /path/to/meshes -o /path/to/output
-    python twisted_cylinder_render.py -- -i /path/to/meshes -o /path/to/output --flat-shading
-    python twisted_cylinder_render.py -- -i /path/to/meshes -o /path/to/output --video --fps 30
+    python crash_ball_render.py -- -i /path/to/meshes -o /path/to/output
+    python crash_ball_render.py -- -i /path/to/meshes -o /path/to/output --flat-shading
+    python crash_ball_render.py -- -i /path/to/meshes -o /path/to/output --video --fps 30
 """
 
 import bpy
@@ -30,13 +30,16 @@ from render_meshes_bt import (
     create_video,
     get_color_for_method,
     load_mesh_with_fallback,
+    split_components_by_face_count,
+    save_largest_and_minz_of_smallest,
 )
 from setMat_doubleColorWire import setMat_doubleColorWire
 from setLight_sun_with_strength import setLight_sun_with_strength
+from setup_world import setup_world, get_blender_hdri
 
-def parse_twisted_cylinder_arguments():
+def parse_crush_ball_arguments():
     """Parse command line arguments with video export option."""
-    parser = argparse.ArgumentParser(description='Render twisted cylinder meshes using BlenderToolbox')
+    parser = argparse.ArgumentParser(description='Render crash ball meshes using BlenderToolbox')
     parser.add_argument('-i', '--input-folder', type=str, required=True,
                         help='Folder containing PLY/OBJ files')
     parser.add_argument('-o', '--output-folder', type=str, required=True,
@@ -85,12 +88,12 @@ def parse_twisted_cylinder_arguments():
 ########################################################
 
 def main():
-    """Custom main function for twisted cylinder rendering."""
+    """Custom main function for crash ball rendering."""
     
     # ========================================
     # Parse arguments
     # ========================================
-    args = parse_twisted_cylinder_arguments()
+    args = parse_crush_ball_arguments()
     
     input_folder = Path(args.input_folder)
     output_folder = Path(args.output_folder)
@@ -135,7 +138,7 @@ def main():
     # Print settings
     # ========================================
     print("\n" + "=" * 50)
-    print("Twisted Cylinder Renderer")
+    print("Crash Ball Renderer")
     print("=" * 50)
     print(f"Input: {input_folder}")
     print(f"Output: {output_folder}")
@@ -162,7 +165,30 @@ def main():
     print(f"\nFound {len(mesh_files)} meshes:")
     for f in mesh_files:
         print(f"  - {f.name}")
+
+    # ========================================
+    # Preprocess meshes:
+    # 1. For each frame, load the mesh, then split the mesh into connected components (should be 2) with meshlab
+    # 2. The actual ball mesh is the largest connected component, where the other connected component is the ground
+    # 3. Save the ball mesh as a new mesh file and compute the ground z position by averaging the z positions of the ground mesh (should be constant for all frames)
+    # ========================================
+    # create a new folder to save the preprocessed meshes (with the same name as the input folder)
+    preprocessed_folder = input_folder / "preprocessed"
+    preprocessed_folder.mkdir(parents=True, exist_ok=True)
+    ground_z_positions = []
+    processed_mesh_files = []
+    for i, mesh_file in enumerate(mesh_files):
+        print(f"  [{i+1}/{len(mesh_files)}] Preprocessing: {mesh_file.name}")
+        # using meshlab to split the mesh into connected components
+        result = save_largest_and_minz_of_smallest(str(mesh_file), str(preprocessed_folder / f"{mesh_file.stem}_ball.ply"))
+        print(f"    Result: {result}")
+        ground_z_positions.append(result["min_z_smallest"])
+        processed_mesh_files.append(preprocessed_folder / f"{mesh_file.stem}_ball.ply")
     
+    ground_z = sum(ground_z_positions) / len(ground_z_positions)
+    print(f"  Ground z position: {ground_z}")
+    mesh_files = processed_mesh_files
+
     # ========================================
     # PASS 1: Load all meshes to compute combined bounds
     # ========================================
@@ -196,7 +222,6 @@ def main():
     combined_center = tuple((global_min[i] + global_max[i]) / 2 for i in range(3))
     combined_size = tuple(global_max[i] - global_min[i] for i in range(3))
     max_dim = max(combined_size)
-    ground_z = global_min[2]
     
     print(f"\n  Combined bounding box:")
     print(f"    Center: {tuple(f'{x:.3f}' for x in combined_center)}")
@@ -210,8 +235,8 @@ def main():
     print(f"{'='*50}")
     
     # Fixed camera position and rotation
-    camera_location = (0, 0, 0.18)
-    camera_rotation = (0, 0, 0)  # Euler rotation in degrees
+    camera_location = (0, 0.6, -0.04)
+    camera_rotation = (-90, 0, 0)  # Euler rotation in degrees
     
     print(f"  Camera location: {camera_location}")
     print(f"  Camera rotation: {camera_rotation}")
@@ -221,7 +246,8 @@ def main():
     # Light settings (fixed)
     # ========================================
     # Sun light with fixed rotation
-    light_rotation = (0, 0, 0)  # Euler rotation in degrees
+    light_rotation = (240, 0, 0)  # Euler rotation in degrees
+    light_location = (0, 0.2, -0.19)
     light_strength = 4.0
     shadow_softness = 0.3
     
@@ -233,6 +259,12 @@ def main():
     meshColor_top = bt.colorObj(obj_color, 0.5, 1.0, 1.0, 0.0, 0.0)
     meshColor_bottom = bt.colorObj(obj_color, 0.5, 1.0, 1.0, 0.0, 0.0)
     ao_strength = 0.5
+
+    # ========================================
+    # World settings (auto-detect Blender HDRI)
+    # ========================================
+    world_path = get_blender_hdri("forest")  # Options: forest, city, courtyard, interior, night, studio, sunrise, sunset
+    
     
     # ========================================
     # PASS 2: Render each mesh
@@ -275,10 +307,14 @@ def main():
         bpy.context.scene.camera = cam
         
         # Lighting (fixed rotation) - using direct Blender API for Blender 4.x compatibility
-        # bt.invisibleGround(shadowBrightness=0.9, location=(0, 0, ground_z))
+        bt.invisibleGround(shadowBrightness=0.9, location=(0, 0, ground_z))
 
         # Sun light
-        sun_light = setLight_sun_with_strength(light_rotation, light_strength, shadow_softness)
+        sun_light = setLight_sun_with_strength(location=light_location, rotation_euler=light_rotation, strength=light_strength, shadow_soft_size=shadow_softness)
+
+        # set world
+        # setup_world(world_path=world_path, world_name="World", strength=1.0, make_film_transparent=True, use_existing_world=True, set_as_scene_world=True)
+    
 
         bt.setLight_ambient(color=(0.1, 0.1, 0.1, 1))
         bt.shadowThreshold(alphaThreshold=0.05, interpolationMode='CARDINAL')

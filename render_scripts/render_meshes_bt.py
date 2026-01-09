@@ -44,6 +44,7 @@ import json
 import numpy as np
 from pathlib import Path
 from PIL import Image
+import pymeshlab
 
 import blendertoolbox as bt
 from setMat_doubleColorWire import setMat_doubleColorWire
@@ -110,6 +111,100 @@ def convert_ply_to_obj_pymeshlab(ply_path, obj_path=None):
     except Exception as e:
         print(f"  ERROR converting {ply_path.name} with pymeshlab: {e}")
         return None
+
+def split_components_by_face_count(meshset: pymeshlab.MeshSet):
+    """
+    Returns a list of (face_count, mesh_id, mesh_name) for each component mesh in the MeshSet.
+    Assumes the MeshSet currently contains exactly one mesh to be split.
+    """
+    if meshset.mesh_number() == 0:
+        return []
+    
+    # Split into connected components; pymeshlab will create new meshes in the MeshSet
+    # Use delete_source_mesh=False to avoid empty meshset issues
+    meshset.generate_splitting_by_connected_components(delete_source_mesh=False)
+
+    # After splitting, the original mesh is at index 0, new components follow
+    # If only 1 component, there will be 2 meshes (original + 1 component)
+    # We want to skip the original (index 0) and use the components
+    num_meshes = meshset.mesh_number()
+    
+    if num_meshes <= 1:
+        # No split happened or something went wrong
+        print("  Warning: No components created after split.")
+        return []
+
+    info = []
+    # Skip mesh 0 (original), iterate through component meshes (1 to num_meshes-1)
+    for i in range(1, num_meshes):
+        try:
+            meshset.set_current_mesh(i)
+            m = meshset.current_mesh()
+            face_count = m.face_number()
+            name = m.mesh_name() if hasattr(m, "mesh_name") else f"component_{i}"
+            info.append((face_count, i, name))
+        except Exception as e:
+            print(f"  Warning: Could not access mesh {i}: {e}")
+            continue
+
+    # Sort by face count
+    info.sort(key=lambda x: x[0])
+    return info
+
+
+def save_largest_and_minz_of_smallest(input_path: str,
+                                     output_largest_path: str,
+                                     output_smallest_path: str | None = None):
+    ms = pymeshlab.MeshSet()
+    ms.load_new_mesh(input_path)
+
+    # Split into connected components (creates multiple meshes in MeshSet)
+    comps = split_components_by_face_count(ms)
+
+    if len(comps) == 0:
+        # Single component or empty mesh - reload and save as-is
+        print(f"  Single component mesh, saving directly: {input_path}")
+        ms = pymeshlab.MeshSet()
+        ms.load_new_mesh(input_path)
+        ms.set_current_mesh(0)
+        m = ms.current_mesh()
+        v = m.vertex_matrix()
+        min_z = float(v[:, 2].min()) if v.shape[0] > 0 else float("nan")
+        face_count = m.face_number()
+        ms.save_current_mesh(output_largest_path)
+        # For single component, smallest = largest
+        if output_smallest_path is not None:
+            ms.save_current_mesh(output_smallest_path)
+        return {
+            "num_components": 1,
+            "largest_faces": face_count,
+            "smallest_faces": face_count,
+            "min_z_smallest": min_z,
+        }
+
+    smallest_faces, smallest_id, _ = comps[0]
+    largest_faces, largest_id, _ = comps[-1]
+
+    # Compute min Z of smallest component (over vertices)
+    ms.set_current_mesh(smallest_id)
+    v = ms.current_mesh().vertex_matrix()  # Nx3 numpy array
+    min_z_smallest = float(v[:, 2].min()) if v.shape[0] > 0 else float("nan")
+
+    # Save largest component
+    ms.set_current_mesh(largest_id)
+    ms.save_current_mesh(output_largest_path)
+
+    # Optionally save smallest component too
+    if output_smallest_path is not None:
+        ms.set_current_mesh(smallest_id)
+        ms.save_current_mesh(output_smallest_path)
+
+    return {
+        "num_components": len(comps),
+        "largest_faces": int(largest_faces),
+        "smallest_faces": int(smallest_faces),
+        "min_z_smallest": min_z_smallest,
+    }
 
 
 def load_mesh_with_fallback(bt, mesh_file, location, rotation, scale, tmp_dir=None):
