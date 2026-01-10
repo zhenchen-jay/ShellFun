@@ -11,8 +11,12 @@ Usage:
 
 import bpy
 import sys
+import os
 import math
 import argparse
+import shutil
+import time
+import stat
 from pathlib import Path
 
 import blendertoolbox as bt
@@ -33,10 +37,73 @@ from render_meshes_bt import (
     split_components_by_face_count,
     save_largest_and_minz_of_smallest,
 )
-from setMat_doubleColorWire import setMat_doubleColorWire
+from setMat_doubleColor_with_wireframe_modifier import setMat_doubleColor_with_wireframe_modifier
 from setLight_sun_with_strength import setLight_sun_with_strength
 from setup_world import setup_world, get_blender_hdri
 from set_invisible_ground import set_invisible_ground
+
+def remove_readonly_handler(func, path, exc_info):
+    """
+    Windows-specific handler to remove read-only files/directories.
+    Called by shutil.rmtree when it encounters permission errors.
+    """
+    try:
+        # Change permissions to allow deletion
+        os.chmod(path, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+        
+        # Retry the original operation that failed
+        func(path)
+    except Exception:
+        # If we still can't delete it after fixing permissions, 
+        # let it propagate to the outer exception handler
+        raise
+
+def safe_rmtree(path, max_retries=3, delay=0.1):
+    """
+    Safely remove a directory tree on Windows, handling locked files and permissions.
+    
+    Args:
+        path: Path to directory to remove
+        max_retries: Maximum number of retry attempts (default: 3)
+        delay: Delay between retries in seconds (default: 0.1)
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    path = Path(path)
+    if not path.exists():
+        return True
+    
+    for attempt in range(max_retries):
+        try:
+            # Remove read-only attributes from all files and directories
+            for root, dirs, files in os.walk(path):
+                for d in dirs:
+                    dir_path = os.path.join(root, d)
+                    try:
+                        os.chmod(dir_path, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+                    except (OSError, PermissionError):
+                        pass
+                for f in files:
+                    file_path = os.path.join(root, f)
+                    try:
+                        os.chmod(file_path, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+                    except (OSError, PermissionError):
+                        pass
+            
+            # Try to remove the directory
+            shutil.rmtree(path, onerror=remove_readonly_handler)
+            return True
+        except (PermissionError, OSError) as e:
+            if attempt < max_retries - 1:
+                time.sleep(delay)
+                delay *= 2  # Exponential backoff
+            else:
+                print(f"  Warning: Could not remove temp folder after {max_retries} attempts: {path}")
+                print(f"    Error: {e}")
+                print(f"    You may need to manually delete: {path}")
+                return False
+    return False
 
 def parse_pin_flip_cloth_arguments():
     """Parse command line arguments with video export option."""
@@ -247,8 +314,8 @@ def main():
     # Light settings (fixed)
     # ========================================
     # Sun light with fixed rotation
-    light_rotation = (-66, 0, 0)  # Euler rotation in degrees
-    light_location = (0, 0.17, 0.73)
+    light_rotation = (-44, 61, 0)  # Euler rotation in degrees
+    light_location = (-0.35, 0.34, 0.85)
     light_strength = 10.0
     shadow_softness = 0.3
     
@@ -298,7 +365,7 @@ def main():
         # bt.subdivision(mesh, level = 2)
         
         # Material
-        setMat_doubleColorWire(mesh, meshColor_top, meshColor_bottom, AOStrength=ao_strength, edgeThickness=0.0005)
+        setMat_doubleColor_with_wireframe_modifier(mesh, meshColor_top, meshColor_bottom, AOStrength=ao_strength, edgeThickness=0.0002)
         
         # Camera (fixed position and rotation using direct Blender API)
         bpy.ops.object.camera_add(location=camera_location)
@@ -335,94 +402,94 @@ def main():
         
         print(f"    ✓ Complete")
     
-    # # ========================================
-    # # Crop images
-    # # ========================================
-    # cropped_paths = rendered_paths  # Default to original if not cropping
+    # ========================================
+    # Crop images
+    # ========================================
+    cropped_paths = rendered_paths  # Default to original if not cropping
     
-    # if do_crop and rendered_paths:
-    #     print(f"\n{'='*50}")
-    #     print("Cropping images")
-    #     print(f"{'='*50}")
+    if do_crop and rendered_paths:
+        print(f"\n{'='*50}")
+        print("Cropping images")
+        print(f"{'='*50}")
         
-    #     crop_box = find_crop_box(rendered_paths)
-    #     if crop_box:
-    #         cropped_paths = crop_images(rendered_paths, crop_box)
+        crop_box = find_crop_box(rendered_paths)
+        if crop_box:
+            cropped_paths = crop_images(rendered_paths, crop_box)
     
-    # # ========================================
-    # # Export videos (both uncropped and cropped)
-    # # ========================================
-    # if export_video and rendered_paths:
-    #     print(f"\n{'='*50}")
-    #     print(f"Exporting videos @ {video_fps} fps")
-    #     print(f"{'='*50}")
+    # ========================================
+    # Export videos (both uncropped and cropped)
+    # ========================================
+    if export_video and rendered_paths:
+        print(f"\n{'='*50}")
+        print(f"Exporting videos @ {video_fps} fps")
+        print(f"{'='*50}")
         
-    #     # Parse video name
-    #     video_name_path = Path(video_name)
-    #     video_stem = video_name_path.stem
-    #     video_suffix = video_name_path.suffix or '.mp4'
+        # Parse video name
+        video_name_path = Path(video_name)
+        video_stem = video_name_path.stem
+        video_suffix = video_name_path.suffix or '.mp4'
         
-    #     # --- Uncropped video ---
-    #     print("\n  [Uncropped video]")
-    #     uncropped_video_name = f"{video_stem}_uncropped{video_suffix}"
-    #     uncropped_video_path = output_folder / uncropped_video_name
+        # --- Uncropped video ---
+        print("\n  [Uncropped video]")
+        uncropped_video_name = f"{video_stem}_uncropped{video_suffix}"
+        uncropped_video_path = output_folder / uncropped_video_name
         
-    #     # Convert original PNGs to JPGs
-    #     print("  Converting PNGs to JPGs...")
-    #     uncropped_jpg_paths = convert_pngs_to_jpgs(rendered_paths, output_folder, suffix="_uncropped")
+        # Convert original PNGs to JPGs
+        print("  Converting PNGs to JPGs...")
+        uncropped_jpg_paths = convert_pngs_to_jpgs(rendered_paths, output_folder, suffix="_uncropped")
         
-    #     print(f"  Creating video...")
-    #     uncropped_result = create_video(uncropped_jpg_paths, uncropped_video_path, video_fps)
-    #     if uncropped_result:
-    #         print(f"  ✓ Video saved: {uncropped_video_path}")
-    #     else:
-    #         print(f"  ✗ Failed to create uncropped video")
+        print(f"  Creating video...")
+        uncropped_result = create_video(uncropped_jpg_paths, uncropped_video_path, video_fps)
+        if uncropped_result:
+            print(f"  ✓ Video saved: {uncropped_video_path}")
+        else:
+            print(f"  ✗ Failed to create uncropped video")
         
-    #     # --- Cropped video ---
-    #     if do_crop and cropped_paths and cropped_paths != rendered_paths:
-    #         print("\n  [Cropped video]")
-    #         cropped_video_path = output_folder / video_name
+        # --- Cropped video ---
+        if do_crop and cropped_paths and cropped_paths != rendered_paths:
+            print("\n  [Cropped video]")
+            cropped_video_path = output_folder / video_name
             
-    #         # Convert cropped PNGs to JPGs
-    #         print("  Converting cropped PNGs to JPGs...")
-    #         cropped_jpg_paths = convert_pngs_to_jpgs(cropped_paths, output_folder)
+            # Convert cropped PNGs to JPGs
+            print("  Converting cropped PNGs to JPGs...")
+            cropped_jpg_paths = convert_pngs_to_jpgs(cropped_paths, output_folder)
             
-    #         print(f"  Creating video...")
-    #         cropped_result = create_video(cropped_jpg_paths, cropped_video_path, video_fps)
-    #         if cropped_result:
-    #             print(f"  ✓ Video saved: {cropped_video_path}")
-    #         else:
-    #             print(f"  ✗ Failed to create cropped video")
+            print(f"  Creating video...")
+            cropped_result = create_video(cropped_jpg_paths, cropped_video_path, video_fps)
+            if cropped_result:
+                print(f"  ✓ Video saved: {cropped_video_path}")
+            else:
+                print(f"  ✗ Failed to create cropped video")
     
-    # # ========================================
-    # # Cleanup temporary files
-    # # ========================================
-    # if tmp_dir.exists():
-    #     import shutil
-    #     shutil.rmtree(tmp_dir)
-    #     print(f"\n  Cleaned up temp folder: {tmp_dir}")
+    # ========================================
+    # Cleanup temporary files
+    # ========================================
+    if tmp_dir.exists():
+        if safe_rmtree(tmp_dir):
+            print(f"\n  Cleaned up temp folder: {tmp_dir}")
+        # else: warning already printed by safe_rmtree
     
-    # # ========================================
-    # # Summary
-    # # ========================================
-    # print("\n" + "=" * 50)
-    # print("COMPLETE!")
-    # print("=" * 50)
-    # print(f"Rendered {len(rendered_paths)} meshes")
-    # print(f"Output: {output_folder}")
+    # ========================================
+    # Summary
+    # ========================================
+    print("\n" + "=" * 50)
+    print("COMPLETE!")
+    print("=" * 50)
+    print(f"Rendered {len(rendered_paths)} meshes")
+    print(f"Output: {output_folder}")
     
-    # print("\nRendered images:")
-    # for p in rendered_paths:
-    #     print(f"  - {p.name}")
+    print("\nRendered images:")
+    for p in rendered_paths:
+        print(f"  - {p.name}")
     
-    # if export_video:
-    #     video_name_path = Path(video_name)
-    #     if video_name_path.is_absolute():
-    #         video_path = video_name_path
-    #     else:
-    #         video_path = output_folder / video_name
-    #     if video_path.exists():
-    #         print(f"\nVideo: {video_path}")
+    if export_video:
+        video_name_path = Path(video_name)
+        if video_name_path.is_absolute():
+            video_path = video_name_path
+        else:
+            video_path = output_folder / video_name
+        if video_path.exists():
+            print(f"\nVideo: {video_path}")
 
 
 if __name__ == "__main__":
