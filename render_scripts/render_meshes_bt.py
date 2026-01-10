@@ -331,13 +331,14 @@ def convert_png_to_jpg(png_file, jpg_file):
     return Path(jpg_file)
 
 
-def convert_pngs_to_jpgs(png_paths, output_folder=None):
+def convert_pngs_to_jpgs(png_paths, output_folder=None, suffix=""):
     """
     Convert a list of PNG files to JPG with white background.
     
     Args:
         png_paths: List of paths to PNG files
         output_folder: Folder to save JPGs (default: same as PNG)
+        suffix: Optional suffix to add to output filenames (e.g., "_uncropped")
     
     Returns:
         List of paths to JPG files
@@ -345,10 +346,11 @@ def convert_pngs_to_jpgs(png_paths, output_folder=None):
     jpg_paths = []
     for png_path in png_paths:
         png_path = Path(png_path)
+        jpg_name = f"{png_path.stem}{suffix}.jpg"
         if output_folder:
-            jpg_path = Path(output_folder) / f"{png_path.stem}.jpg"
+            jpg_path = Path(output_folder) / jpg_name
         else:
-            jpg_path = png_path.parent / f"{png_path.stem}.jpg"
+            jpg_path = png_path.parent / jpg_name
         convert_png_to_jpg(png_path, jpg_path)
         jpg_paths.append(jpg_path)
         print(f"  Converted: {png_path.name} -> {jpg_path.name}")

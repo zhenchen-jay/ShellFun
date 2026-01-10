@@ -32,3 +32,6 @@
 *.swp
 
 build/*
+render_scripts/__pycache__/*
+.DS_Store
+render_scripts/.DS_Store

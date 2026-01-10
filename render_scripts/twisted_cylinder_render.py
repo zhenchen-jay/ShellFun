@@ -313,35 +313,49 @@ def main():
             cropped_paths = crop_images(rendered_paths, crop_box)
     
     # ========================================
-    # Export video
+    # Export videos (both uncropped and cropped)
     # ========================================
-    if export_video and cropped_paths:
+    if export_video and rendered_paths:
         print(f"\n{'='*50}")
-        print(f"Exporting video @ {video_fps} fps")
+        print(f"Exporting videos @ {video_fps} fps")
         print(f"{'='*50}")
         
-        # Ensure video is saved to output folder if no path provided
+        # Parse video name
         video_name_path = Path(video_name)
-        if video_name_path.is_absolute():
-            video_path = video_name_path
-        else:
-            video_path = output_folder / video_name
+        video_stem = video_name_path.stem
+        video_suffix = video_name_path.suffix or '.mp4'
         
-        # Use cropped images if available, otherwise original
-        images_for_video = cropped_paths if cropped_paths else rendered_paths
+        # --- Uncropped video ---
+        print("\n  [Uncropped video]")
+        uncropped_video_name = f"{video_stem}_uncropped{video_suffix}"
+        uncropped_video_path = output_folder / uncropped_video_name
         
-        # Convert PNGs to JPGs with white background for video
+        # Convert original PNGs to JPGs
         print("  Converting PNGs to JPGs...")
-        jpg_paths = convert_pngs_to_jpgs(images_for_video, output_folder)
+        uncropped_jpg_paths = convert_pngs_to_jpgs(rendered_paths, output_folder, suffix="_uncropped")
         
-        # Create video from JPGs
         print(f"  Creating video...")
-        video_result = create_video(jpg_paths, video_path, video_fps)
-        
-        if video_result:
-            print(f"  ✓ Video saved: {video_path}")
+        uncropped_result = create_video(uncropped_jpg_paths, uncropped_video_path, video_fps)
+        if uncropped_result:
+            print(f"  ✓ Video saved: {uncropped_video_path}")
         else:
-            print(f"  ✗ Failed to create video")
+            print(f"  ✗ Failed to create uncropped video")
+        
+        # --- Cropped video ---
+        if do_crop and cropped_paths and cropped_paths != rendered_paths:
+            print("\n  [Cropped video]")
+            cropped_video_path = output_folder / video_name
+            
+            # Convert cropped PNGs to JPGs
+            print("  Converting cropped PNGs to JPGs...")
+            cropped_jpg_paths = convert_pngs_to_jpgs(cropped_paths, output_folder)
+            
+            print(f"  Creating video...")
+            cropped_result = create_video(cropped_jpg_paths, cropped_video_path, video_fps)
+            if cropped_result:
+                print(f"  ✓ Video saved: {cropped_video_path}")
+            else:
+                print(f"  ✗ Failed to create cropped video")
     
     # ========================================
     # Cleanup temporary files

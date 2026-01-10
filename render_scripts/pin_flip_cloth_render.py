@@ -1,12 +1,12 @@
 """
-Custom render script for crush can simulation using BlenderToolbox.
+Custom render script for pin flip cloth simulation using BlenderToolbox.
 
 Uses utility functions from render_meshes_bt.py
 
 Usage:
-    python crush_can_render.py -- -i /path/to/meshes -o /path/to/output
-    python crush_can_render.py -- -i /path/to/meshes -o /path/to/output --flat-shading
-    python crush_can_render.py -- -i /path/to/meshes -o /path/to/output --video --fps 30
+    python pin_flip_cloth_render.py -- -i /path/to/meshes -o /path/to/output
+    python pin_flip_cloth_render.py -- -i /path/to/meshes -o /path/to/output --flat-shading
+    python pin_flip_cloth_render.py -- -i /path/to/meshes -o /path/to/output --video --fps 30
 """
 
 import bpy
@@ -30,24 +30,27 @@ from render_meshes_bt import (
     create_video,
     get_color_for_method,
     load_mesh_with_fallback,
+    split_components_by_face_count,
+    save_largest_and_minz_of_smallest,
 )
-from setMat_metal_wrapper import setMat_metal_wrapper
+from setMat_doubleColorWire import setMat_doubleColorWire
 from setLight_sun_with_strength import setLight_sun_with_strength
 from setup_world import setup_world, get_blender_hdri
+from set_invisible_ground import set_invisible_ground
 
-def parse_crush_can_arguments():
+def parse_pin_flip_cloth_arguments():
     """Parse command line arguments with video export option."""
-    parser = argparse.ArgumentParser(description='Render crush can meshes using BlenderToolbox')
+    parser = argparse.ArgumentParser(description='Render pin flip cloth meshes using BlenderToolbox')
     parser.add_argument('-i', '--input-folder', type=str, required=True,
                         help='Folder containing PLY/OBJ files')
     parser.add_argument('-o', '--output-folder', type=str, required=True,
                         help='Folder to save rendered images')
     parser.add_argument('--samples', type=int, default=128,
                         help='Render samples (default: 128)')
-    parser.add_argument('--resolution-x', type=int, default=1080,
-                        help='Render width (default: 1080)')
-    parser.add_argument('--resolution-y', type=int, default=1080,
-                        help='Render height (default: 1080)')
+    parser.add_argument('--resolution-x', type=int, default=2160,
+                        help='Render width (default: 2160)')
+    parser.add_argument('--resolution-y', type=int, default=2160,
+                        help='Render height (default: 2160)')
     parser.add_argument('--exposure', type=float, default=1.5,
                         help='Exposure (default: 1.5)')
     parser.add_argument('--focal-length', type=float, default=45.0,
@@ -86,12 +89,12 @@ def parse_crush_can_arguments():
 ########################################################
 
 def main():
-    """Custom main function for crush can rendering."""
+    """Custom main function for pin flip cloth rendering."""
     
     # ========================================
     # Parse arguments
     # ========================================
-    args = parse_crush_can_arguments()
+    args = parse_pin_flip_cloth_arguments()
     
     input_folder = Path(args.input_folder)
     output_folder = Path(args.output_folder)
@@ -126,10 +129,6 @@ def main():
     
     print(f"Method name: {method_name}, Object color: {obj_color}")
 
-    # ========================================
-    # World settings (auto-detect Blender HDRI)
-    # ========================================
-    world_path = get_blender_hdri("forest")  # Options: forest, city, courtyard, interior, night, studio, sunrise, sunset
     
     # Mesh transform
     mesh_location = (0, 0, 0)
@@ -140,11 +139,10 @@ def main():
     # Print settings
     # ========================================
     print("\n" + "=" * 50)
-    print("Crush Can Renderer")
+    print("Pin Flip Cloth Renderer")
     print("=" * 50)
     print(f"Input: {input_folder}")
     print(f"Output: {output_folder}")
-    print(f"World: {world_path}")
     print(f"Resolution: {resolution_x}x{resolution_y}")
     print(f"Samples: {samples}, Exposure: {exposure}")
     print(f"Mesh color: {obj_color} (custom)")
@@ -156,7 +154,7 @@ def main():
     # Find mesh files
     # ========================================
     mesh_files = []
-    for ext in ['.ply', '.obj']:
+    for ext in ['.ply', '.obj'] or ext in ['.PLY', '.OBJ']:
         mesh_files.extend(input_folder.glob(f'*{ext}'))
     # Natural sort: frame_1, frame_2, ..., frame_10 (not frame_1, frame_10, frame_2)
     mesh_files = sorted(mesh_files, key=natural_sort_key)
@@ -168,7 +166,30 @@ def main():
     print(f"\nFound {len(mesh_files)} meshes:")
     for f in mesh_files:
         print(f"  - {f.name}")
+
+    # ========================================
+    # Preprocess meshes:
+    # 1. For each frame, load the mesh, then split the mesh into connected components (should be 2) with meshlab
+    # 2. The actual cloth mesh is the largest connected component, where the other connected component is the ground
+    # 3. Save the cloth mesh as a new mesh file and compute the ground z position by averaging the z positions of the ground mesh (should be constant for all frames)
+    # ========================================
+    # create a new folder to save the preprocessed meshes (with the same name as the input folder)
+    preprocessed_folder = input_folder / "preprocessed"
+    preprocessed_folder.mkdir(parents=True, exist_ok=True)
+    ground_z_positions = []
+    processed_mesh_files = []
+    for i, mesh_file in enumerate(mesh_files):
+        print(f"  [{i+1}/{len(mesh_files)}] Preprocessing: {mesh_file.name}")
+        # using meshlab to split the mesh into connected components
+        result = save_largest_and_minz_of_smallest(str(mesh_file), str(preprocessed_folder / f"{mesh_file.stem}_cloth.ply"))
+        print(f"    Result: {result}")
+        ground_z_positions.append(result["min_z_smallest"])
+        processed_mesh_files.append(preprocessed_folder / f"{mesh_file.stem}_cloth.ply")
     
+    ground_z = sum(ground_z_positions) / len(ground_z_positions)
+    print(f"  Ground z position: {ground_z}")
+    mesh_files = processed_mesh_files
+
     # ========================================
     # PASS 1: Load all meshes to compute combined bounds
     # ========================================
@@ -180,8 +201,8 @@ def main():
     
     global_min = [float('inf')] * 3
     global_max = [float('-inf')] * 3
-    tmp_dir = output_folder / '_tmp_converted'
     
+    tmp_dir = output_folder / '_tmp_converted'
     for i, mesh_file in enumerate(mesh_files):
         print(f"  [{i+1}/{len(mesh_files)}] Loading: {mesh_file.name}")
         mesh = load_mesh_with_fallback(bt, mesh_file, mesh_location, mesh_rotation, mesh_scale, tmp_dir)
@@ -215,8 +236,8 @@ def main():
     print(f"{'='*50}")
     
     # Fixed camera position and rotation
-    camera_location = (0, 0, 0.18)
-    camera_rotation = (0, 0, 0)  # Euler rotation in degrees
+    camera_location = (1.47, -0.96, 0.07)
+    camera_rotation = (-100, 90, -100)  # Euler rotation in degrees
     
     print(f"  Camera location: {camera_location}")
     print(f"  Camera rotation: {camera_rotation}")
@@ -226,8 +247,9 @@ def main():
     # Light settings (fixed)
     # ========================================
     # Sun light with fixed rotation
-    light_rotation = (0, 0, 0)  # Euler rotation in degrees
-    light_strength = 4.0
+    light_rotation = (-66, 0, 0)  # Euler rotation in degrees
+    light_location = (0, 0.17, 0.73)
+    light_strength = 10.0
     shadow_softness = 0.3
     
     print(f"\n  Sun light rotation: {light_rotation}")
@@ -235,6 +257,15 @@ def main():
     
     # Material color (custom, not from args)
     print(f"  Material color: {obj_color}")
+    meshColor_top = bt.colorObj(obj_color, 0.5, 1.0, 1.0, 0.0, 0.0)
+    meshColor_bottom = bt.colorObj((0.3, 0.3, 0.3, 1.0), 0.5, 1.0, 1.0, 0.0, 0.0)
+    ao_strength = 0.5
+
+    # ========================================
+    # World settings (auto-detect Blender HDRI)
+    # ========================================
+    world_path = get_blender_hdri("forest")  # Options: forest, city, courtyard, interior, night, studio, sunrise, sunset
+    
     
     # ========================================
     # PASS 2: Render each mesh
@@ -263,13 +294,11 @@ def main():
         else:
             bpy.ops.object.shade_smooth()
         
+        # subdivide the mesh
+        # bt.subdivision(mesh, level = 2)
+        
         # Material
-        metal_val = 1.0
-        roughness_val = 0.3
-        setMat_metal_wrapper(mesh, obj_color, metal_val, roughness_val)
-
-        setup_world(world_path=world_path, world_name="World", strength=1.0, make_film_transparent=True, use_existing_world=True, set_as_scene_world=True)
-    
+        setMat_doubleColorWire(mesh, meshColor_top, meshColor_bottom, AOStrength=ao_strength, edgeThickness=0.0005)
         
         # Camera (fixed position and rotation using direct Blender API)
         bpy.ops.object.camera_add(location=camera_location)
@@ -279,16 +308,20 @@ def main():
         bpy.context.scene.camera = cam
         
         # Lighting (fixed rotation) - using direct Blender API for Blender 4.x compatibility
-        # bt.invisibleGround(shadowBrightness=0.9, location=(0, 0, ground_z))
+        set_invisible_ground(location=(0, -ground_z, 0), rotation_euler=(90, 0, 0))
 
         # Sun light
-        # sun_light = setLight_sun_with_strength(light_rotation, light_strength, shadow_softness)
+        sun_light = setLight_sun_with_strength(location=light_location, rotation_euler=light_rotation, strength=light_strength, shadow_soft_size=shadow_softness)
+
+        # set world
+        # setup_world(world_path=world_path, world_name="World", strength=1.0, make_film_transparent=True, use_existing_world=True, set_as_scene_world=True)
+    
 
         bt.setLight_ambient(color=(0.1, 0.1, 0.1, 1))
         bt.shadowThreshold(alphaThreshold=0.05, interpolationMode='CARDINAL')
         
-        # Save blend for first mesh
-        if i == 0:
+        # Save blend for the selected mesh
+        if i == 23:
             blend_path = output_folder / "scene.blend"
             bpy.ops.wm.save_mainfile(filepath=str(blend_path))
             print(f"    Saved blend: {blend_path}")
@@ -302,94 +335,94 @@ def main():
         
         print(f"    ✓ Complete")
     
-    # ========================================
-    # Crop images
-    # ========================================
-    cropped_paths = rendered_paths  # Default to original if not cropping
+    # # ========================================
+    # # Crop images
+    # # ========================================
+    # cropped_paths = rendered_paths  # Default to original if not cropping
     
-    if do_crop and rendered_paths:
-        print(f"\n{'='*50}")
-        print("Cropping images")
-        print(f"{'='*50}")
+    # if do_crop and rendered_paths:
+    #     print(f"\n{'='*50}")
+    #     print("Cropping images")
+    #     print(f"{'='*50}")
         
-        crop_box = find_crop_box(rendered_paths)
-        if crop_box:
-            cropped_paths = crop_images(rendered_paths, crop_box)
+    #     crop_box = find_crop_box(rendered_paths)
+    #     if crop_box:
+    #         cropped_paths = crop_images(rendered_paths, crop_box)
     
-    # ========================================
-    # Export videos (both uncropped and cropped)
-    # ========================================
-    if export_video and rendered_paths:
-        print(f"\n{'='*50}")
-        print(f"Exporting videos @ {video_fps} fps")
-        print(f"{'='*50}")
+    # # ========================================
+    # # Export videos (both uncropped and cropped)
+    # # ========================================
+    # if export_video and rendered_paths:
+    #     print(f"\n{'='*50}")
+    #     print(f"Exporting videos @ {video_fps} fps")
+    #     print(f"{'='*50}")
         
-        # Parse video name
-        video_name_path = Path(video_name)
-        video_stem = video_name_path.stem
-        video_suffix = video_name_path.suffix or '.mp4'
+    #     # Parse video name
+    #     video_name_path = Path(video_name)
+    #     video_stem = video_name_path.stem
+    #     video_suffix = video_name_path.suffix or '.mp4'
         
-        # --- Uncropped video ---
-        print("\n  [Uncropped video]")
-        uncropped_video_name = f"{video_stem}_uncropped{video_suffix}"
-        uncropped_video_path = output_folder / uncropped_video_name
+    #     # --- Uncropped video ---
+    #     print("\n  [Uncropped video]")
+    #     uncropped_video_name = f"{video_stem}_uncropped{video_suffix}"
+    #     uncropped_video_path = output_folder / uncropped_video_name
         
-        # Convert original PNGs to JPGs
-        print("  Converting PNGs to JPGs...")
-        uncropped_jpg_paths = convert_pngs_to_jpgs(rendered_paths, output_folder, suffix="_uncropped")
+    #     # Convert original PNGs to JPGs
+    #     print("  Converting PNGs to JPGs...")
+    #     uncropped_jpg_paths = convert_pngs_to_jpgs(rendered_paths, output_folder, suffix="_uncropped")
         
-        print(f"  Creating video...")
-        uncropped_result = create_video(uncropped_jpg_paths, uncropped_video_path, video_fps)
-        if uncropped_result:
-            print(f"  ✓ Video saved: {uncropped_video_path}")
-        else:
-            print(f"  ✗ Failed to create uncropped video")
+    #     print(f"  Creating video...")
+    #     uncropped_result = create_video(uncropped_jpg_paths, uncropped_video_path, video_fps)
+    #     if uncropped_result:
+    #         print(f"  ✓ Video saved: {uncropped_video_path}")
+    #     else:
+    #         print(f"  ✗ Failed to create uncropped video")
         
-        # --- Cropped video ---
-        if do_crop and cropped_paths and cropped_paths != rendered_paths:
-            print("\n  [Cropped video]")
-            cropped_video_path = output_folder / video_name
+    #     # --- Cropped video ---
+    #     if do_crop and cropped_paths and cropped_paths != rendered_paths:
+    #         print("\n  [Cropped video]")
+    #         cropped_video_path = output_folder / video_name
             
-            # Convert cropped PNGs to JPGs
-            print("  Converting cropped PNGs to JPGs...")
-            cropped_jpg_paths = convert_pngs_to_jpgs(cropped_paths, output_folder)
+    #         # Convert cropped PNGs to JPGs
+    #         print("  Converting cropped PNGs to JPGs...")
+    #         cropped_jpg_paths = convert_pngs_to_jpgs(cropped_paths, output_folder)
             
-            print(f"  Creating video...")
-            cropped_result = create_video(cropped_jpg_paths, cropped_video_path, video_fps)
-            if cropped_result:
-                print(f"  ✓ Video saved: {cropped_video_path}")
-            else:
-                print(f"  ✗ Failed to create cropped video")
+    #         print(f"  Creating video...")
+    #         cropped_result = create_video(cropped_jpg_paths, cropped_video_path, video_fps)
+    #         if cropped_result:
+    #             print(f"  ✓ Video saved: {cropped_video_path}")
+    #         else:
+    #             print(f"  ✗ Failed to create cropped video")
     
-    # ========================================
-    # Cleanup temporary files
-    # ========================================
-    if tmp_dir.exists():
-        import shutil
-        shutil.rmtree(tmp_dir)
-        print(f"\n  Cleaned up temp folder: {tmp_dir}")
+    # # ========================================
+    # # Cleanup temporary files
+    # # ========================================
+    # if tmp_dir.exists():
+    #     import shutil
+    #     shutil.rmtree(tmp_dir)
+    #     print(f"\n  Cleaned up temp folder: {tmp_dir}")
     
-    # ========================================
-    # Summary
-    # ========================================
-    print("\n" + "=" * 50)
-    print("COMPLETE!")
-    print("=" * 50)
-    print(f"Rendered {len(rendered_paths)} meshes")
-    print(f"Output: {output_folder}")
+    # # ========================================
+    # # Summary
+    # # ========================================
+    # print("\n" + "=" * 50)
+    # print("COMPLETE!")
+    # print("=" * 50)
+    # print(f"Rendered {len(rendered_paths)} meshes")
+    # print(f"Output: {output_folder}")
     
-    print("\nRendered images:")
-    for p in rendered_paths:
-        print(f"  - {p.name}")
+    # print("\nRendered images:")
+    # for p in rendered_paths:
+    #     print(f"  - {p.name}")
     
-    if export_video:
-        video_name_path = Path(video_name)
-        if video_name_path.is_absolute():
-            video_path = video_name_path
-        else:
-            video_path = output_folder / video_name
-        if video_path.exists():
-            print(f"\nVideo: {video_path}")
+    # if export_video:
+    #     video_name_path = Path(video_name)
+    #     if video_name_path.is_absolute():
+    #         video_path = video_name_path
+    #     else:
+    #         video_path = output_folder / video_name
+    #     if video_path.exists():
+    #         print(f"\nVideo: {video_path}")
 
 
 if __name__ == "__main__":
