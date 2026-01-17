@@ -33,5 +33,17 @@
 
 build/*
 render_scripts/__pycache__/*
+render_scripts/imgui.ini
+render_scripts/.polyscope.ini
 .DS_Store
 render_scripts/.DS_Store
+
+data_processing/__pycache__/*
+data_processing/.DS_Store
+data_processing/imgui.ini
+data_processing/polyscope.ini
+data_processing/.polyscope.ini
+
+.DS_Store
+.polyscope.ini
+imgui.ini
