@@ -1,12 +1,12 @@
 """
-Custom render script for twisted cylinder simulation using BlenderToolbox.
+Custom render script for twisted cloth simulation using BlenderToolbox.
 
 Uses utility functions from render_meshes_bt.py
 
 Usage:
-    python twisted_cylinder_render.py -- -i /path/to/meshes -o /path/to/output
-    python twisted_cylinder_render.py -- -i /path/to/meshes -o /path/to/output --flat-shading
-    python twisted_cylinder_render.py -- -i /path/to/meshes -o /path/to/output --video --fps 30
+    python twisted_cloth_render.py -- -i /path/to/meshes -o /path/to/output
+    python twisted_cloth_render.py -- -i /path/to/meshes -o /path/to/output --flat-shading
+    python twisted_cloth_render.py -- -i /path/to/meshes -o /path/to/output --video --fps 30
 """
 
 import bpy
@@ -30,13 +30,14 @@ from render_meshes_bt import (
     create_video,
     get_color_for_method,
     load_mesh_with_fallback,
+    setup_gpu_rendering,
 )
 from setMat_doubleColorWire import setMat_doubleColorWire
 from setLight_sun_with_strength import setLight_sun_with_strength
 
-def parse_twisted_cylinder_arguments():
+def parse_twisted_cloth_arguments():
     """Parse command line arguments with video export option."""
-    parser = argparse.ArgumentParser(description='Render twisted cylinder meshes using BlenderToolbox')
+    parser = argparse.ArgumentParser(description='Render twisted cloth meshes using BlenderToolbox')
     parser.add_argument('-i', '--input-folder', type=str, required=True,
                         help='Folder containing PLY/OBJ files')
     parser.add_argument('-o', '--output-folder', type=str, required=True,
@@ -85,12 +86,12 @@ def parse_twisted_cylinder_arguments():
 ########################################################
 
 def main():
-    """Custom main function for twisted cylinder rendering."""
+    """Custom main function for twisted cloth rendering."""
     
     # ========================================
     # Parse arguments
     # ========================================
-    args = parse_twisted_cylinder_arguments()
+    args = parse_twisted_cloth_arguments()
     
     input_folder = Path(args.input_folder)
     output_folder = Path(args.output_folder)
@@ -135,7 +136,7 @@ def main():
     # Print settings
     # ========================================
     print("\n" + "=" * 50)
-    print("Twisted Cylinder Renderer")
+    print("Twisted cloth Renderer")
     print("=" * 50)
     print(f"Input: {input_folder}")
     print(f"Output: {output_folder}")
@@ -248,6 +249,7 @@ def main():
         
         # Fresh scene
         bt.blenderInit(resolution_x, resolution_y, samples, exposure)
+        setup_gpu_rendering()
         
         # Load mesh (with fallback to PyMeshLab conversion for problematic PLY files)
         mesh = load_mesh_with_fallback(bt, mesh_file, mesh_location, mesh_rotation, mesh_scale, tmp_dir)

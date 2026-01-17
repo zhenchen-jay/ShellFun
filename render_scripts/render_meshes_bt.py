@@ -207,6 +207,51 @@ def save_largest_and_minz_of_smallest(input_path: str,
     }
 
 
+def setup_gpu_rendering():
+    """
+    Configure Blender to use GPU rendering if available.
+    
+    Automatically detects available GPU compute types (CUDA, OPTIX, METAL, HIP, OPENCL)
+    and enables all available devices.
+    
+    Should be called after bt.blenderInit() to ensure Cycles is active.
+    """
+    import bpy
+    
+    scene = bpy.context.scene
+    
+    try:
+        scene.cycles.device = 'GPU'
+        prefs = bpy.context.preferences.addons['cycles'].preferences
+        
+        # Try to detect available compute device types
+        # Common types: OPTIX (NVIDIA RTX), CUDA (NVIDIA), METAL (macOS), HIP (AMD), OPENCL
+        available_types = []
+        for compute_type in ['OPTIX', 'CUDA', 'METAL', 'HIP', 'OPENCL']:
+            try:
+                prefs.compute_device_type = compute_type
+                prefs.get_devices()
+                if prefs.devices:
+                    available_types.append(compute_type)
+                    print(f"  GPU acceleration: {compute_type}")
+                    break
+            except (TypeError, AttributeError):
+                continue
+        
+        if not available_types:
+            print("  No GPU acceleration available, using CPU")
+            scene.cycles.device = 'CPU'
+        else:
+            # Enable all available devices
+            for device in prefs.devices:
+                device.use = True
+                print(f"    Enabled device: {device.name}")
+    except Exception as e:
+        print(f"  Warning: Could not configure GPU acceleration: {e}")
+        print("  Falling back to CPU rendering")
+        scene.cycles.device = 'CPU'
+
+
 def load_mesh_with_fallback(bt, mesh_file, location, rotation, scale, tmp_dir=None):
     """
     Load a mesh file with Blender, falling back to PyMeshLab conversion if needed.

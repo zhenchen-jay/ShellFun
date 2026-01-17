@@ -30,6 +30,7 @@ from render_meshes_bt import (
     create_video,
     get_color_for_method,
     load_mesh_with_fallback,
+    setup_gpu_rendering,
 )
 from setMat_metal_wrapper import setMat_metal_wrapper
 from setLight_sun_with_strength import setLight_sun_with_strength
@@ -250,6 +251,7 @@ def main():
         
         # Fresh scene
         bt.blenderInit(resolution_x, resolution_y, samples, exposure)
+        setup_gpu_rendering()
         
         # Load mesh (with fallback to PyMeshLab conversion for problematic PLY files)
         mesh = load_mesh_with_fallback(bt, mesh_file, mesh_location, mesh_rotation, mesh_scale, tmp_dir)

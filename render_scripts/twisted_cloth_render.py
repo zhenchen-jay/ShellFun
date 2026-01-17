@@ -1,18 +1,22 @@
 """
-Custom render script for crash ball simulation using BlenderToolbox.
+Custom render script for pin flip cloth simulation using BlenderToolbox.
 
 Uses utility functions from render_meshes_bt.py
 
 Usage:
-    python crash_ball_render.py -- -i /path/to/meshes -o /path/to/output
-    python crash_ball_render.py -- -i /path/to/meshes -o /path/to/output --flat-shading
-    python crash_ball_render.py -- -i /path/to/meshes -o /path/to/output --video --fps 30
+    python twisted_cloth_render.py -- -i /path/to/meshes -o /path/to/output
+    python twisted_cloth_render.py -- -i /path/to/meshes -o /path/to/output --flat-shading
+    python twisted_cloth_render.py -- -i /path/to/meshes -o /path/to/output --video --fps 30
 """
 
 import bpy
 import sys
+import os
 import math
 import argparse
+import shutil
+import time
+import stat
 from pathlib import Path
 
 import blendertoolbox as bt
@@ -34,24 +38,88 @@ from render_meshes_bt import (
     save_largest_and_minz_of_smallest,
     setup_gpu_rendering,
 )
-from setMat_doubleColorWire import setMat_doubleColorWire
+from setMat_doubleColor_with_wireframe_modifier import setMat_doubleColor_with_wireframe_modifier
 from setLight_sun_with_strength import setLight_sun_with_strength
 from setup_world import setup_world, get_blender_hdri
 from set_invisible_ground import set_invisible_ground
+from setMat_metal_wrapper import setMat_metal_wrapper
 
-def parse_crush_ball_arguments():
+def remove_readonly_handler(func, path, exc_info):
+    """
+    Windows-specific handler to remove read-only files/directories.
+    Called by shutil.rmtree when it encounters permission errors.
+    """
+    try:
+        # Change permissions to allow deletion
+        os.chmod(path, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+        
+        # Retry the original operation that failed
+        func(path)
+    except Exception:
+        # If we still can't delete it after fixing permissions, 
+        # let it propagate to the outer exception handler
+        raise
+
+def safe_rmtree(path, max_retries=3, delay=0.1):
+    """
+    Safely remove a directory tree on Windows, handling locked files and permissions.
+    
+    Args:
+        path: Path to directory to remove
+        max_retries: Maximum number of retry attempts (default: 3)
+        delay: Delay between retries in seconds (default: 0.1)
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    path = Path(path)
+    if not path.exists():
+        return True
+    
+    for attempt in range(max_retries):
+        try:
+            # Remove read-only attributes from all files and directories
+            for root, dirs, files in os.walk(path):
+                for d in dirs:
+                    dir_path = os.path.join(root, d)
+                    try:
+                        os.chmod(dir_path, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+                    except (OSError, PermissionError):
+                        pass
+                for f in files:
+                    file_path = os.path.join(root, f)
+                    try:
+                        os.chmod(file_path, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+                    except (OSError, PermissionError):
+                        pass
+            
+            # Try to remove the directory
+            shutil.rmtree(path, onerror=remove_readonly_handler)
+            return True
+        except (PermissionError, OSError) as e:
+            if attempt < max_retries - 1:
+                time.sleep(delay)
+                delay *= 2  # Exponential backoff
+            else:
+                print(f"  Warning: Could not remove temp folder after {max_retries} attempts: {path}")
+                print(f"    Error: {e}")
+                print(f"    You may need to manually delete: {path}")
+                return False
+    return False
+
+def parse_pin_flip_cloth_arguments():
     """Parse command line arguments with video export option."""
-    parser = argparse.ArgumentParser(description='Render crash ball meshes using BlenderToolbox')
+    parser = argparse.ArgumentParser(description='Render pin flip cloth meshes using BlenderToolbox')
     parser.add_argument('-i', '--input-folder', type=str, required=True,
                         help='Folder containing PLY/OBJ files')
     parser.add_argument('-o', '--output-folder', type=str, required=True,
                         help='Folder to save rendered images')
     parser.add_argument('--samples', type=int, default=128,
                         help='Render samples (default: 128)')
-    parser.add_argument('--resolution-x', type=int, default=1080,
-                        help='Render width (default: 1080)')
-    parser.add_argument('--resolution-y', type=int, default=1080,
-                        help='Render height (default: 1080)')
+    parser.add_argument('--resolution-x', type=int, default=2160,
+                        help='Render width (default: 2160)')
+    parser.add_argument('--resolution-y', type=int, default=2160,
+                        help='Render height (default: 2160)')
     parser.add_argument('--exposure', type=float, default=1.5,
                         help='Exposure (default: 1.5)')
     parser.add_argument('--focal-length', type=float, default=45.0,
@@ -90,12 +158,12 @@ def parse_crush_ball_arguments():
 ########################################################
 
 def main():
-    """Custom main function for crash ball rendering."""
+    """Custom main function for pin flip cloth rendering."""
     
     # ========================================
     # Parse arguments
     # ========================================
-    args = parse_crush_ball_arguments()
+    args = parse_pin_flip_cloth_arguments()
     
     input_folder = Path(args.input_folder)
     output_folder = Path(args.output_folder)
@@ -140,7 +208,7 @@ def main():
     # Print settings
     # ========================================
     print("\n" + "=" * 50)
-    print("Crash Ball Renderer")
+    print("Pin Flip Cloth Renderer")
     print("=" * 50)
     print(f"Input: {input_folder}")
     print(f"Output: {output_folder}")
@@ -168,66 +236,6 @@ def main():
     for f in mesh_files:
         print(f"  - {f.name}")
 
-    # ========================================
-    # Preprocess meshes:
-    # 1. For each frame, load the mesh, then split the mesh into connected components (should be 2) with meshlab
-    # 2. The actual ball mesh is the largest connected component, where the other connected component is the ground
-    # 3. Save the ball mesh as a new mesh file and compute the ground z position by averaging the z positions of the ground mesh (should be constant for all frames)
-    # ========================================
-    # create a new folder to save the preprocessed meshes (with the same name as the input folder)
-    preprocessed_folder = input_folder / "preprocessed"
-    preprocessed_folder.mkdir(parents=True, exist_ok=True)
-    ground_z_positions = []
-    processed_mesh_files = []
-    for i, mesh_file in enumerate(mesh_files):
-        print(f"  [{i+1}/{len(mesh_files)}] Preprocessing: {mesh_file.name}")
-        # using meshlab to split the mesh into connected components
-        result = save_largest_and_minz_of_smallest(str(mesh_file), str(preprocessed_folder / f"{mesh_file.stem}_ball.ply"))
-        print(f"    Result: {result}")
-        ground_z_positions.append(result["min_z_smallest"])
-        processed_mesh_files.append(preprocessed_folder / f"{mesh_file.stem}_ball.ply")
-    
-    ground_z = sum(ground_z_positions) / len(ground_z_positions)
-    print(f"  Ground z position: {ground_z}")
-    mesh_files = processed_mesh_files
-
-    # ========================================
-    # PASS 1: Load all meshes to compute combined bounds
-    # ========================================
-    print(f"\n{'='*50}")
-    print("Pass 1: Computing combined bounding box")
-    print(f"{'='*50}")
-    
-    bt.blenderInit(resolution_x, resolution_y, samples, exposure)
-    
-    global_min = [float('inf')] * 3
-    global_max = [float('-inf')] * 3
-    
-    tmp_dir = output_folder / '_tmp_converted'
-    for i, mesh_file in enumerate(mesh_files):
-        print(f"  [{i+1}/{len(mesh_files)}] Loading: {mesh_file.name}")
-        mesh = load_mesh_with_fallback(bt, mesh_file, mesh_location, mesh_rotation, mesh_scale, tmp_dir)
-        if mesh is None:
-            print(f"    ERROR: Failed to load {mesh_file.name}, skipping...")
-            continue
-        bbox_center, bbox_size = get_mesh_bounds(mesh)
-        
-        for j in range(3):
-            mesh_min = bbox_center[j] - bbox_size[j] / 2
-            mesh_max = bbox_center[j] + bbox_size[j] / 2
-            global_min[j] = min(global_min[j], mesh_min)
-            global_max[j] = max(global_max[j], mesh_max)
-        
-        print(f"    Bounds: center={tuple(f'{x:.3f}' for x in bbox_center)}")
-    
-    # Compute derived values
-    combined_center = tuple((global_min[i] + global_max[i]) / 2 for i in range(3))
-    combined_size = tuple(global_max[i] - global_min[i] for i in range(3))
-    max_dim = max(combined_size)
-    
-    print(f"\n  Combined bounding box:")
-    print(f"    Center: {tuple(f'{x:.3f}' for x in combined_center)}")
-    print(f"    Size: {tuple(f'{x:.3f}' for x in combined_size)}")
     
     # ========================================
     # Camera settings (fixed)
@@ -237,8 +245,8 @@ def main():
     print(f"{'='*50}")
     
     # Fixed camera position and rotation
-    camera_location = (0, 0, 0.5)
-    camera_rotation = (0, 0, 0)  # Euler rotation in degrees
+    camera_location = (0.76, -3.3, 0.65)
+    camera_rotation = (90, 0, 0)  # Euler rotation in degrees
     
     print(f"  Camera location: {camera_location}")
     print(f"  Camera rotation: {camera_rotation}")
@@ -248,8 +256,8 @@ def main():
     # Light settings (fixed)
     # ========================================
     # Sun light with fixed rotation
-    light_rotation = (-30, 0, 0)  # Euler rotation in degrees
-    light_location = (0, 0.17, 0.20)
+    light_rotation = (98.6883, -16.9346, -1.85937)  # Euler rotation in degrees
+    light_location = (0.812986, -3.43492, 3.65679)
     light_strength = 4.0
     shadow_softness = 0.3
     
@@ -259,22 +267,22 @@ def main():
     # Material color (custom, not from args)
     print(f"  Material color: {obj_color}")
     meshColor_top = bt.colorObj(obj_color, 0.5, 1.0, 1.0, 0.0, 0.0)
-    meshColor_bottom = bt.colorObj(obj_color, 0.5, 1.0, 1.0, 0.0, 0.0)
+    meshColor_bottom = bt.colorObj((0.3, 0.3, 0.3, 1.0), 0.5, 1.0, 1.0, 0.0, 0.0)
     ao_strength = 0.5
 
     # ========================================
     # World settings (auto-detect Blender HDRI)
     # ========================================
-    world_path = get_blender_hdri("forest")  # Options: forest, city, courtyard, interior, night, studio, sunrise, sunset
+    # world_path = get_blender_hdri("forest")  # Options: forest, city, courtyard, interior, night, studio, sunrise, sunset
     
     
     # ========================================
-    # PASS 2: Render each mesh
+    # PASS 1: Render each mesh
     # ========================================
     print(f"\n{'='*50}")
     print("Pass 2: Rendering each mesh")
     print(f"{'='*50}")
-    
+    tmp_dir = output_folder / '_tmp_converted'
     rendered_paths = []
     
     for i, mesh_file in enumerate(mesh_files):
@@ -286,9 +294,6 @@ def main():
         
         # Load mesh (with fallback to PyMeshLab conversion for problematic PLY files)
         mesh = load_mesh_with_fallback(bt, mesh_file, mesh_location, mesh_rotation, mesh_scale, tmp_dir)
-        if mesh is None:
-            print(f"    ERROR: Failed to load {mesh_file.name}, skipping...")
-            continue
         
         # Shading
         if flat_shading:
@@ -297,10 +302,10 @@ def main():
             bpy.ops.object.shade_smooth()
         
         # subdivide the mesh
-        bt.subdivision(mesh, level = 2)
+        # bt.subdivision(mesh, level = 2)
         
         # Material
-        setMat_doubleColorWire(mesh, meshColor_top, meshColor_bottom, AOStrength=ao_strength)
+        setMat_doubleColor_with_wireframe_modifier(mesh, meshColor_top, meshColor_bottom, AOStrength=ao_strength, edgeThickness=0.0002)
         
         # Camera (fixed position and rotation using direct Blender API)
         bpy.ops.object.camera_add(location=camera_location)
@@ -310,7 +315,7 @@ def main():
         bpy.context.scene.camera = cam
         
         # Lighting (fixed rotation) - using direct Blender API for Blender 4.x compatibility
-        set_invisible_ground(location=(0, -ground_z, 0), rotation_euler=(90, 0, 0))
+        # set_invisible_ground(location=(0, -ground_z, 0), rotation_euler=(90, 0, 0))
 
         # Sun light
         sun_light = setLight_sun_with_strength(location=light_location, rotation_euler=light_rotation, strength=light_strength, shadow_soft_size=shadow_softness)
@@ -322,11 +327,12 @@ def main():
         bt.setLight_ambient(color=(0.1, 0.1, 0.1, 1))
         bt.shadowThreshold(alphaThreshold=0.05, interpolationMode='CARDINAL')
         
-        # Save blend for first mesh
-        if i == 0:
+        # Save blend for the selected mesh
+        if i == len(mesh_files) - 1:
             blend_path = output_folder / "scene.blend"
             bpy.ops.wm.save_mainfile(filepath=str(blend_path))
             print(f"    Saved blend: {blend_path}")
+            
         
         # Render
         suffix = "_flat" if flat_shading else ""
@@ -400,9 +406,9 @@ def main():
     # Cleanup temporary files
     # ========================================
     if tmp_dir.exists():
-        import shutil
-        shutil.rmtree(tmp_dir)
-        print(f"\n  Cleaned up temp folder: {tmp_dir}")
+        if safe_rmtree(tmp_dir):
+            print(f"\n  Cleaned up temp folder: {tmp_dir}")
+        # else: warning already printed by safe_rmtree
     
     # ========================================
     # Summary

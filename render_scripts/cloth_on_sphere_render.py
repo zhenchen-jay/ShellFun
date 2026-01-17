@@ -36,6 +36,7 @@ from render_meshes_bt import (
     load_mesh_with_fallback,
     split_components_by_face_count,
     save_largest_and_minz_of_smallest,
+    setup_gpu_rendering,
 )
 from setMat_doubleColor_with_wireframe_modifier import setMat_doubleColor_with_wireframe_modifier
 from setLight_sun_with_strength import setLight_sun_with_strength
@@ -349,12 +350,11 @@ def main():
     rendered_paths = []
     
     for i, mesh_file in enumerate(mesh_files):
-        if i != len(mesh_files) - 1:
-            continue
         print(f"\n  [{i+1}/{len(mesh_files)}] Rendering: {mesh_file.name}")
         
         # Fresh scene
         bt.blenderInit(resolution_x, resolution_y, samples, exposure)
+        setup_gpu_rendering()
         
         # Load mesh (with fallback to PyMeshLab conversion for problematic PLY files)
         mesh = load_mesh_with_fallback(bt, mesh_file, mesh_location, mesh_rotation, mesh_scale, tmp_dir)
