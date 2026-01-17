@@ -32,6 +32,7 @@ from render_meshes_bt import (
     load_mesh_with_fallback,
     split_components_by_face_count,
     save_largest_and_minz_of_smallest,
+    setup_gpu_rendering,
 )
 from setMat_doubleColor_with_wireframe_modifier import setMat_doubleColor_with_wireframe_modifier
 from setLight_sun_with_strength import setLight_sun_with_strength
@@ -47,10 +48,10 @@ def parse_popper_arguments():
                         help='Folder to save rendered images')
     parser.add_argument('--samples', type=int, default=128,
                         help='Render samples (default: 128)')
-    parser.add_argument('--resolution-x', type=int, default=1080,
-                        help='Render width (default: 1080)')
-    parser.add_argument('--resolution-y', type=int, default=1080,
-                        help='Render height (default: 1080)')
+    parser.add_argument('--resolution-x', type=int, default=2160,
+                        help='Render width (default: 2160)')
+    parser.add_argument('--resolution-y', type=int, default=2160,
+                        help='Render height (default: 2160)')
     parser.add_argument('--exposure', type=float, default=1.5,
                         help='Exposure (default: 1.5)')
     parser.add_argument('--focal-length', type=float, default=45.0,
@@ -281,6 +282,7 @@ def main():
         
         # Fresh scene
         bt.blenderInit(resolution_x, resolution_y, samples, exposure)
+        setup_gpu_rendering()
         
         # Load mesh (with fallback to PyMeshLab conversion for problematic PLY files)
         mesh = load_mesh_with_fallback(bt, mesh_file, mesh_location, mesh_rotation, mesh_scale, tmp_dir)
