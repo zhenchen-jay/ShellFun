@@ -46,7 +46,7 @@ def parse_crush_cone_arguments():
                         help='Folder containing PLY/OBJ files')
     parser.add_argument('-o', '--output-folder', type=str, required=True,
                         help='Folder to save rendered images')
-    parser.add_argument('--samples', type=int, default=128,
+    parser.add_argument('--samples', type=int, default=300,
                         help='Render samples (default: 128)')
     parser.add_argument('--resolution-x', type=int, default=2160,
                         help='Render width (default: 2160)')
