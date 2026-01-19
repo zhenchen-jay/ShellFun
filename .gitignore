@@ -47,3 +47,6 @@ data_processing/.polyscope.ini
 .DS_Store
 .polyscope.ini
 imgui.ini
+
+# Machine-specific config files
+running_scipts/config.sh

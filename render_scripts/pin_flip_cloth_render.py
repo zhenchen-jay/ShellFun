@@ -197,10 +197,11 @@ def main():
     
     print(f"Method name: {method_name}, Object color: {obj_color}")
 
+    special_handling = "Vertex_Based" in method_name
     
     # Mesh transform
-    mesh_location = (0, 0, 0)
-    mesh_rotation = (90, 0, 0)  # Y-up to Z-up
+    mesh_location = (0, 0, 0) if not special_handling else (1, 0, 0)
+    mesh_rotation = (90, 0, 0) if not special_handling else (90, 180, 0)  
     mesh_scale = (1, 1, 1)
     
     # ========================================
@@ -327,6 +328,9 @@ def main():
     print(f"  Material color: {obj_color}")
     meshColor_top = bt.colorObj(obj_color, 0.5, 1.0, 1.0, 0.0, 0.0)
     meshColor_bottom = bt.colorObj((0.3, 0.3, 0.3, 1.0), 0.5, 1.0, 1.0, 0.0, 0.0)
+    if special_handling:
+        # swap the top and bottom colors
+        meshColor_top, meshColor_bottom = meshColor_bottom, meshColor_top
     ao_strength = 0.5
 
     # ========================================
