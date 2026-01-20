@@ -82,14 +82,14 @@ echo "================================================"
 echo ""
 
 folders=(
-  "Directional_StVK_Bending_Tan_RestFlat"
+  # "Directional_StVK_Bending_Tan_RestFlat"
   "Discrete_Hinge_Bending_Tan"
-  "Vertex_Based_Quadratic_Bending_Tan"
-  "Directional_StVK_Bending_Tan"
-  "Directional_StVK_Bending_Angle"
-  "Directional_StVK_Bending_Angle_RestFlat"
-  "Directional_StVK_Bending_Sin"
-  "Directional_StVK_Bending_Sin_RestFlat"
+  #"Vertex_Based_Quadratic_Bending_Tan"
+  #"Directional_StVK_Bending_Tan"
+  #"Directional_StVK_Bending_Angle"
+  #"Directional_StVK_Bending_Angle_RestFlat"
+  #"Directional_StVK_Bending_Sin"
+  #"Directional_StVK_Bending_Sin_RestFlat"
 )
 
 for name in "${folders[@]}"; do
@@ -106,7 +106,7 @@ for name in "${folders[@]}"; do
   fi
   
   # Normal render
-  python "$render_script" -- -i "$input_path" -o "$output_path" --samples 300
+  python "$render_script" -- -i "$input_path" -o "$output_path" --samples 300 --edge-thickness 0.00002
   echo "  Done!"
   
   # Special handling: Additional render with --render-plane flag
@@ -115,7 +115,7 @@ for name in "${folders[@]}"; do
     echo "  [Additional render with --render-plane]"
     output_path_plane="${output_root}/${name}_plane"
     echo "  Output: $output_path_plane"
-    python "$render_script" -- -i "$input_path" -o "$output_path_plane" --samples 300 --render-plane
+    python "$render_script" -- -i "$input_path" -o "$output_path_plane" --samples 300 --render-plane --resolution-x 4320 --resolution-y 4320 --edge-thickness 0.00002
     echo "  Done!"
   fi
   

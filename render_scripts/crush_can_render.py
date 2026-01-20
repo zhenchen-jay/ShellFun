@@ -135,6 +135,10 @@ def main():
     # Mesh transform
     mesh_location = (0, 0, 0)
     mesh_rotation = (90, 0, 0)  # Y-up to Z-up
+    if method_name in ["Discrete_Hinge_Bending_Tan", "Directional_StVK_Bending_Tan_RestFlat"]:
+        mesh_rotation = (90, -120, 0)
+    elif method_name in ["Directional_StVK_Bending_Tan"]:
+        mesh_rotation = (90, 120, 0)
     mesh_scale = (1, 1, 1)
     
     # ========================================

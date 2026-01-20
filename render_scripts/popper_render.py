@@ -58,7 +58,7 @@ def parse_popper_arguments():
                         help='Camera focal length in mm (default: 45.0)')
     parser.add_argument('--flat-shading', action='store_true', default=False,
                         help='Use flat shading instead of smooth')
-    parser.add_argument('--crop', action='store_true', default=True,
+    parser.add_argument('--crop', action='store_true', default=False,
                         help='Crop images to content')
     
     # Video export options
@@ -300,17 +300,18 @@ def main():
         # bt.subdivision(mesh, level = 2)
         
         # Material
-        setMat_doubleColor_with_wireframe_modifier(mesh, meshColor_top, meshColor_bottom, AOStrength=ao_strength, edgeThickness=0.0002)
+        setMat_doubleColor_with_wireframe_modifier(mesh, meshColor_top, meshColor_bottom, AOStrength=ao_strength, edgeThickness=0.0001)
         
         # Camera (fixed position and rotation using direct Blender API)
-        camera_location = camera_location_before_transition if i < transition_frame_idx else camera_location_after_transition
-        camera_rotation = camera_rotation_before_transition if i < transition_frame_idx else camera_rotation_after_transition
+        camera_location = camera_location_after_transition
+        camera_rotation = camera_rotation_after_transition
 
-        if i > transition_frame_idx + 100:
+        # Final zoom out camera location and rotation
+        if i > transition_frame_idx + 200 or i > 400:
             camera_location = camera_location_final
             camera_rotation = camera_rotation_final
 
-        if i > transition_frame_idx:
+        if i >= transition_frame_idx:
             set_invisible_ground(location=(0, -plane_z, 0), rotation_euler=(90, 0, 0))
         
         bpy.ops.object.camera_add(location=camera_location)
@@ -343,8 +344,6 @@ def main():
         rendered_paths.append(output_path)
         
         print(f"    ✓ Complete")
-
-    return
     
     # ========================================
     # Crop images

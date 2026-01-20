@@ -63,6 +63,8 @@ def parse_crush_cone_arguments():
                         help='Crop images to content')
     parser.add_argument('--render-plane', action='store_true', default=False,
                         help='Render the plane mesh')
+    parser.add_argument('--edge-thickness', type=float, default=0,
+                        help='Edge thickness (default: 0)')
     # Video export options
     parser.add_argument('--video', action='store_true', default=True,
                         help='Export video from rendered images (default: enabled)')
@@ -142,6 +144,8 @@ def main():
     # Mesh transform
     mesh_location = (0, 0, 0)
     mesh_rotation = (90, 0, 0)  # Y-up to Z-up
+    if method_name in ["Discrete_Hinge_Bending_Tan"]:
+        mesh_rotation = (90, 180, 0)
     mesh_scale = (1, 1, 1)
     
     # ========================================
@@ -216,8 +220,8 @@ def main():
     print(f"{'='*50}")
     
     # Fixed camera position and rotation
-    camera_location = (0.000927, -0.133195, 0.185552)
-    camera_rotation = (-23.6001, 0, 180)  # Euler rotation in degrees
+    camera_location = (0.2, -0.133195, 0)
+    camera_rotation = (-23.6001, -90, 180)  # Euler rotation in degrees
     
     print(f"  Camera location: {camera_location}")
     print(f"  Camera rotation: {camera_rotation}")
@@ -227,9 +231,11 @@ def main():
     # Light settings (fixed)
     # ========================================
     # Sun light with fixed rotation
-    light_location = (-0.002021, -0.070422, 0.139655)  # Euler rotation in degrees
-    light_rotation = (14.415, 3.93116, -31.1833)
-    light_strength = 3.0
+    # light_location = (-0.002021, -0.070422, 0.139655)  # Euler rotation in degrees
+    # light_rotation = (14.415, 3.93116, -31.1833)
+    light_location = (0.148175, -0.057746, -0.045495)  # Euler rotation in degrees
+    light_rotation = (-87.4471, 30, -165.375)
+    light_strength = 2.0
     shadow_softness = 0.3
     
     print(f"\n  Sun light rotation: {light_rotation}")
@@ -272,11 +278,11 @@ def main():
         # setMat_metal_wrapper(mesh, obj_color, metal_val, roughness_val)
         meshColor_top = bt.colorObj(obj_color, 0.5, 1.0, 1.0, 0.0, 0.0)
         meshColor_bottom = bt.colorObj(obj_color, 0.5, 1.0, 1.0, 0.0, 0.0)
-        setMat_doubleColor_with_wireframe_modifier(mesh, meshColor_top, meshColor_bottom, AOStrength=1.0, edgeThickness=0.00005)
+        setMat_doubleColor_with_wireframe_modifier(mesh, meshColor_top, meshColor_bottom, AOStrength=1.0, edgeThickness=args.edge_thickness)
 
         if args.render_plane:
             plane_mesh_file = plane_mesh_files[i]
-            plane_mesh = load_mesh_with_fallback(bt, plane_mesh_file, mesh_location, mesh_rotation, mesh_scale, tmp_dir)
+            plane_mesh = load_mesh_with_fallback(bt, plane_mesh_file, (0, -args.edge_thickness * 0.5, 0), mesh_rotation, mesh_scale, tmp_dir)
             if plane_mesh is None:
                 print(f"    ERROR: Failed to load {plane_mesh_file.name}, skipping...")
                 continue
@@ -313,8 +319,6 @@ def main():
         print(f"    Rendering to: {output_path}")
         bt.renderImage(str(output_path), cam)
         rendered_paths.append(output_path)
-
-        return
         
         print(f"    ✓ Complete")
     
