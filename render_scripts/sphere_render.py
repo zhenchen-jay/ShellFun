@@ -121,8 +121,8 @@ def main():
     print(f"{'='*50}")
     
      # Fixed camera position and rotation
-    camera_location = (-0.11, -0.16, 0.13)
-    camera_rotation = (50, 0, -50)  # Euler rotation in degrees
+    camera_location = (0, 0, 0.13)
+    camera_rotation = (0, 0, 0)  # Euler rotation in degrees
     
     print(f"  Camera location: {camera_location}")
     print(f"  Camera rotation: {camera_rotation}")

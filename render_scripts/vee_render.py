@@ -36,13 +36,13 @@ def parse_half_cylinder_render_arguments():
 
     parser.add_argument('--samples', type=int, default=300,
                         help='Render samples (default: 300)')
-    parser.add_argument('--resolution-x', type=int, default=1080,
-                        help='Render width (default: 1080)')
-    parser.add_argument('--resolution-y', type=int, default=1080,
-                        help='Render height (default: 1080)')
+    parser.add_argument('--resolution-x', type=int, default=2160,
+                        help='Render width (default: 2160)')
+    parser.add_argument('--resolution-y', type=int, default=2160,
+                        help='Render height (default: 2160)')
     parser.add_argument('--focal-length', type=float, default=45.0,
                         help='Camera focal length in mm (default: 45.0)')
-    parser.add_argument('--flat-shading', action='store_true', help="Whether to use flat shading", default=False)
+    parser.add_argument('--flat-shading', action='store_false', help="Whether to use flat shading", default=True)
     parser.add_argument('--edge-thickness', type=float, help="Edge thickness (default: 0.0001)", default=0.0001)
     
     if '--' in sys.argv:
@@ -121,8 +121,8 @@ def main():
     print(f"{'='*50}")
     
      # Fixed camera position and rotation
-    camera_location = (-0.11, -0.16, 0.13)
-    camera_rotation = (50, 0, -50)  # Euler rotation in degrees
+    camera_location = (-0.055721, -0.046295, 0.180794)
+    camera_rotation = (-6.06732, 21.0898, -176.963)  # Euler rotation in degrees
     
     print(f"  Camera location: {camera_location}")
     print(f"  Camera rotation: {camera_rotation}")
@@ -132,8 +132,8 @@ def main():
     # Light settings (fixed)
     # ========================================
     # Sun light with fixed rotation
-    light_rotation = (0, 0, 0)  # Euler rotation in degrees
-    light_location = (0, 0, 0)
+    light_rotation = (21.4398, -29.2862, 6.49015)  # Euler rotation in degrees
+    light_location = (-0.016111, -0.028536, 0.092772)
     light_strength = 2.0
     shadow_softness = 0.3
     
@@ -189,7 +189,7 @@ def main():
     # Sun light
     sun_light = setLight_sun_with_strength(location=light_location, rotation_euler=light_rotation, strength=light_strength, shadow_soft_size=shadow_softness)
 
-    bt.setLight_ambient(color=(0.1, 0.1, 0.1, 1))
+    bt.setLight_ambient(color=(1, 1, 1, 1))
     bt.shadowThreshold(alphaThreshold=0.05, interpolationMode='CARDINAL')
     
     # Ensure output directory exists
