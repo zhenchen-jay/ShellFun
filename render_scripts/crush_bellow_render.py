@@ -350,7 +350,7 @@ def main():
         bpy.ops.object.camera_add(location=camera_location)
         cam = bpy.context.object
         cam.rotation_euler = tuple(math.radians(a) for a in camera_rotation)
-        cam.data.lens = focal_length
+        cam.data.lens = focal_length # for zoom out view, we need to set this to 25
         bpy.context.scene.camera = cam
         
         # Lighting (fixed rotation) - using direct Blender API for Blender 4.x compatibility
