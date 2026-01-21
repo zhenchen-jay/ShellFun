@@ -62,8 +62,8 @@ def parse_crush_cone_arguments():
                         help='Use flat shading instead of smooth')
     parser.add_argument('--crop', action='store_true', default=False,
                         help='Crop images to content')
-    parser.add_argument('--edge-thickness', type=float, default=0.0001,
-                        help='Edge thickness (default: 0.0001)')
+    parser.add_argument('--edge-thickness', type=float, default=0,
+                        help='Edge thickness (default: 0)')
     # Video export options
     parser.add_argument('--video', action='store_true', default=True,
                         help='Export video from rendered images (default: enabled)')

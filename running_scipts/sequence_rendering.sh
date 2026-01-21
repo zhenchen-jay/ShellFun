@@ -83,18 +83,25 @@ echo ""
 
 folders=(
   # "Directional_StVK_Bending_Tan_RestFlat"
+  "Directional_StVK_Bending_Tan"
+  "Vertex_Based_Quadratic_Bending_Tan"
   "Discrete_Hinge_Bending_Tan"
-  #"Vertex_Based_Quadratic_Bending_Tan"
-  #"Directional_StVK_Bending_Tan"
   #"Directional_StVK_Bending_Angle"
   #"Directional_StVK_Bending_Angle_RestFlat"
   #"Directional_StVK_Bending_Sin"
   #"Directional_StVK_Bending_Sin_RestFlat"
 )
 
+# ============================================
+# Pass 1: Normal renders
+# ============================================
+echo "Pass 1: Normal renders"
+echo "================================================"
+echo ""
+
 for name in "${folders[@]}"; do
-  input_path="${input_root}/${name}"
-  output_path="${output_root}/${name}"
+  input_path="${input_root}/${name}/area_2e-5"
+  output_path="${output_root}/${name}/area_2e-5"
 
   echo "Processing: $name"
   echo "  Input:  $input_path"
@@ -102,23 +109,41 @@ for name in "${folders[@]}"; do
   
   if [[ ! -d "$input_path" ]]; then
     echo "  Warning: Input directory not found, skipping..."
+    echo ""
     continue
   fi
   
   # Normal render
-  python "$render_script" -- -i "$input_path" -o "$output_path" --samples 300 --edge-thickness 0.00002
+  python "$render_script" -- -i "$input_path" -o "$output_path" --samples 300
   echo "  Done!"
+  echo ""
+done
+
+# ============================================
+# Pass 2: Zoomed-out renders
+# ============================================
+echo "================================================"
+echo "Pass 2: Zoomed-out renders (focal_length=25)"
+echo "================================================"
+echo ""
+
+for name in "${folders[@]}"; do
+  input_path="${input_root}/${name}/area_2e-5"
+  output_path_zoomed="${output_root}/${name}/area_2e-5_zoomed_out"
+
+  echo "Processing: $name (zoomed-out)"
+  echo "  Input:  $input_path"
+  echo "  Output: $output_path_zoomed"
   
-  # Special handling: Additional render with --render-plane flag
-  if [[ "$name" == "Directional_StVK_Bending_Tan_RestFlat" ]]; then
+  if [[ ! -d "$input_path" ]]; then
+    echo "  Warning: Input directory not found, skipping..."
     echo ""
-    echo "  [Additional render with --render-plane]"
-    output_path_plane="${output_root}/${name}_plane"
-    echo "  Output: $output_path_plane"
-    python "$render_script" -- -i "$input_path" -o "$output_path_plane" --samples 300 --render-plane --resolution-x 4320 --resolution-y 4320 --edge-thickness 0.00002
-    echo "  Done!"
+    continue
   fi
   
+  # Zoomed-out render with focal_length = 25
+  python "$render_script" -- -i "$input_path" -o "$output_path_zoomed" --samples 300 --focal-length 25
+  echo "  Done!"
   echo ""
 done
 
