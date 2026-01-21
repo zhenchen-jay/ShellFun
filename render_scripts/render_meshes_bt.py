@@ -152,6 +152,114 @@ def split_components_by_face_count(meshset: pymeshlab.MeshSet):
     return info
 
 
+def split_bellows_cone_sphere(input_path: str,
+                              output_bellows_path: str,
+                              output_cone_path: str,
+                              output_sphere_path: str):
+    """
+    Split mesh into 3 connected components: bellows, cone, and sphere.
+    
+    Identification strategy:
+    - Bellows: Largest vertex count
+    - Cone vs Sphere: Distinguished by bounding box size (cone has larger bbox)
+    
+    Args:
+        input_path: Path to input mesh file
+        output_bellows_path: Path to save bellows mesh
+        output_cone_path: Path to save cone mesh
+        output_sphere_path: Path to save sphere mesh
+    
+    Returns:
+        Dict with keys 'bellows', 'cone', 'sphere' containing info about each component,
+        or None if splitting failed
+    """
+    import numpy as np
+    
+    ms = pymeshlab.MeshSet()
+    ms.load_new_mesh(input_path)
+    
+    # Split into connected components
+    ms.generate_splitting_by_connected_components(delete_source_mesh=False)
+    
+    num_meshes = ms.mesh_number()
+    
+    if num_meshes < 4:  # Original + 3 components
+        print(f"  Warning: Expected 3 components, but got {num_meshes - 1}")
+        return None
+    
+    # Collect info about each component (skip original at index 0)
+    components = []
+    for i in range(1, num_meshes):
+        try:
+            ms.set_current_mesh(i)
+            m = ms.current_mesh()
+            
+            # Get vertex count
+            vertex_count = m.vertex_number()
+            
+            # Get bounding box size
+            bbox_min = m.bounding_box().min()
+            bbox_max = m.bounding_box().max()
+            bbox_size = np.linalg.norm(bbox_max - bbox_min)  # Diagonal length
+            
+            components.append({
+                'index': i,
+                'vertex_count': vertex_count,
+                'bbox_size': bbox_size,
+                'bbox_min': bbox_min,
+                'bbox_max': bbox_max
+            })
+        except Exception as e:
+            print(f"  Warning: Could not access mesh {i}: {e}")
+            continue
+    
+    if len(components) < 3:
+        print(f"  Error: Could not identify 3 components")
+        return None
+    
+    # Sort by vertex count to identify bellows (largest)
+    components_by_vertices = sorted(components, key=lambda x: x['vertex_count'], reverse=True)
+    bellows = components_by_vertices[0]
+    
+    # Remaining two components: cone and sphere
+    remaining = [c for c in components if c['index'] != bellows['index']]
+    
+    # Sort by bbox size to distinguish cone (larger) from sphere (smaller)
+    remaining_by_bbox = sorted(remaining, key=lambda x: x['bbox_size'], reverse=True)
+    cone = remaining_by_bbox[0]
+    sphere = remaining_by_bbox[1]
+    
+    # Save each component
+    ms.set_current_mesh(bellows['index'])
+    ms.save_current_mesh(output_bellows_path)
+    
+    ms.set_current_mesh(cone['index'])
+    ms.save_current_mesh(output_cone_path)
+    
+    ms.set_current_mesh(sphere['index'])
+    ms.save_current_mesh(output_sphere_path)
+    
+    result = {
+        'bellows': {
+            'path': output_bellows_path,
+            'vertices': bellows['vertex_count'],
+            'bbox_size': bellows['bbox_size']
+        },
+        'cone': {
+            'path': output_cone_path,
+            'vertices': cone['vertex_count'],
+            'bbox_size': cone['bbox_size']
+        },
+        'sphere': {
+            'path': output_sphere_path,
+            'vertices': sphere['vertex_count'],
+            'bbox_size': sphere['bbox_size']
+        }
+    }
+    
+    return result
+
+
 def save_largest_and_minz_of_smallest(input_path: str,
                                      output_largest_path: str,
                                      output_smallest_path: str | None = None):
