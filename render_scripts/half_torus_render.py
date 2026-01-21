@@ -121,8 +121,8 @@ def main():
     print(f"{'='*50}")
     
      # Fixed camera position and rotation
-    camera_location = (-0.11, -0.16, 0.13)
-    camera_rotation = (50, 0, -50)  # Euler rotation in degrees
+    camera_location = (0, -0.15, -0.09)
+    camera_rotation = (120, 0, 0)  # Euler rotation in degrees
     
     print(f"  Camera location: {camera_location}")
     print(f"  Camera rotation: {camera_rotation}")
@@ -132,7 +132,7 @@ def main():
     # Light settings (fixed)
     # ========================================
     # Sun light with fixed rotation
-    light_rotation = (0, 0, 0)  # Euler rotation in degrees
+    light_rotation = (90, 0, 0)  # Euler rotation in degrees
     light_location = (0, 0, 0)
     light_strength = 2.0
     shadow_softness = 0.3

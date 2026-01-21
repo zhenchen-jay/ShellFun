@@ -75,7 +75,7 @@ def parse_vertex_file(vertex_file_path):
     
     return result
 
-def draw_vertex_points(mesh_obj, vertex_indices, color, point_size=0.005, name_prefix="vertex_points"):
+def draw_vertex_points(mesh_obj, vertex_indices, color, point_size=0.0002, name_prefix="vertex_points", is_first_frame=False):
     """
     Draw spheres at specified vertex positions.
     
@@ -85,6 +85,10 @@ def draw_vertex_points(mesh_obj, vertex_indices, color, point_size=0.005, name_p
         color: RGB or RGBA tuple for the sphere color
         point_size: Radius of the spheres
         name_prefix: Prefix for the sphere object names
+        is_first_frame: Whether this is the first frame of the animation
+    
+    Returns:
+        List of sphere objects created
     """
     if not vertex_indices:
         return []
@@ -114,22 +118,50 @@ def draw_vertex_points(mesh_obj, vertex_indices, color, point_size=0.005, name_p
         sphere = bpy.context.active_object
         sphere.name = f"{name_prefix}_{idx}"
         
-        # Apply material
-        mat = bpy.data.materials.new(name=f"Material_{name_prefix}_{idx}")
+        # CRITICAL: Make mesh data unique for each sphere
+        sphere.data = sphere.data.copy()
+        
+        # Create a UNIQUE material for THIS sphere (no sharing!)
+        mat_name = f"Material_{name_prefix}_{idx}"
+        mat = bpy.data.materials.new(name=mat_name)
         mat.use_nodes = True
-        nodes = mat.node_tree.nodes
-        nodes.clear()
+        mat_nodes = mat.node_tree.nodes
+        mat_nodes.clear()
         
-        # Create emission shader for bright color
-        node_emission = nodes.new(type='ShaderNodeEmission')
-        node_emission.inputs['Color'].default_value = (*color[:3], 1.0)
-        node_emission.inputs['Strength'].default_value = 2.0
+        # Use Principled BSDF without emission for clean colors that respond to lighting
+        node_bsdf = mat_nodes.new(type='ShaderNodeBsdfPrincipled')
+        node_bsdf.inputs['Base Color'].default_value = (*color[:3], 1.0)
+        node_bsdf.inputs['Metallic'].default_value = 0.0
+        node_bsdf.inputs['Roughness'].default_value = 0.4
+        node_bsdf.location = (0, 0)
+
+        # only for the first frame of the animation
+        if is_first_frame and name_prefix == "scripted":
+            node_bsdf.inputs['Emission Color'].default_value = (*color[:3], 1.0)
+            node_bsdf.inputs['Emission Strength'].default_value = 1.0  # make scripted points brighter
         
-        node_output = nodes.new(type='ShaderNodeOutputMaterial')
-        mat.node_tree.links.new(node_emission.outputs['Emission'], node_output.inputs['Surface'])
+        node_output = mat_nodes.new(type='ShaderNodeOutputMaterial')
+        node_output.location = (300, 0)
+        mat.node_tree.links.new(node_bsdf.outputs['BSDF'], node_output.inputs['Surface'])
         
+        # Clear any existing materials and apply the new unique material
+        sphere.data.materials.clear()
         sphere.data.materials.append(mat)
-        spheres.append(sphere)
+        sphere.active_material_index = 0
+        
+        # Force Blender to update the scene
+        bpy.context.view_layer.update()
+        
+        # Verify the material was applied correctly
+        if len(sphere.data.materials) > 0 and sphere.data.materials[0] == mat:
+            spheres.append(sphere)
+        else:
+            print(f"    ERROR: Failed to apply material to sphere {sphere.name}")
+    
+    print(f"    Created {len(spheres)} spheres with unique materials, color {color[:3]}")
+    
+    # Final scene update after all spheres created
+    bpy.context.view_layer.update()
     
     return spheres
 
@@ -155,8 +187,10 @@ def parse_popper_render_single_frame_arguments():
     parser.add_argument('--edge-thickness', type=float, help="Edge thickness (default: 0.0001)", default=0.0001)
     parser.add_argument('--vertex-file', type=str, default=None,
                         help='Path to vertex file with pinned/scripted vertex indices')
-    parser.add_argument('--point-size', type=float, default=0.005,
-                        help='Size of vertex points (default: 0.005)')
+    parser.add_argument('--point-size', type=float, default=0.0002,
+                        help='Size of vertex points (default: 0.0002)')
+    parser.add_argument('--is-first-frame', action='store_true', default=False,
+                        help='Whether this is the first frame of the animation')
     
     if '--' in sys.argv:
         args = parser.parse_args(sys.argv[sys.argv.index('--') + 1:])
@@ -196,7 +230,7 @@ def main():
     edge_thickness = args.edge_thickness
     vertex_file = args.vertex_file
     point_size = args.point_size
-    
+    is_first_frame = args.is_first_frame
     if not input_mesh.exists():
         print(f"ERROR: Input mesh not found: {input_mesh}")
         sys.exit(1)
@@ -234,7 +268,7 @@ def main():
     print(f"Edge thickness: {edge_thickness}")
     print(f"Vertex file: {vertex_file if vertex_file else 'None'}")
     print(f"Point size: {point_size}")
-    
+    print(f"Is first frame: {is_first_frame}")
     # ========================================
     # Parse vertex file if provided
     # ========================================
@@ -296,6 +330,7 @@ def main():
     # Fresh scene
     bt.blenderInit(resolution_x, resolution_y, samples, exposure)
     setup_gpu_rendering()
+
     
     # Load mesh (with fallback to PyMeshLab conversion for problematic PLY files)
     mesh = load_mesh_with_fallback(bt, input_mesh, mesh_location, mesh_rotation, mesh_scale)
@@ -319,30 +354,46 @@ def main():
     # Draw vertex points if vertex file was provided
     if vertices_data:
         print(f"\n  Drawing vertex points...")
-        
-        # Draw pinned vertices in red
-        if vertices_data['pinned']:
-            pinned_color = (1.0, 0.0, 0.0)  # Red
-            pinned_spheres = draw_vertex_points(
-                mesh, 
-                vertices_data['pinned'], 
-                pinned_color, 
-                point_size=point_size,
-                name_prefix="pinned"
-            )
-            print(f"    Drew {len(pinned_spheres)} pinned vertices (red)")
+
+        pinned_set = set(vertices_data["pinned"])
+        scripted_set = set(vertices_data["scripted"])
+        overlap = pinned_set & scripted_set
+
+        if overlap:
+            print(f"  Removing {len(overlap)} overlapped vertices from PINNED "
+                f"(scripted takes priority)")
+
+        # Keep order, remove overlaps from pinned
+        vertices_data["pinned"] = [i for i in vertices_data["pinned"] if i not in scripted_set]
+
         
         # Draw scripted vertices in blue
         if vertices_data['scripted']:
-            scripted_color = (0.0, 0.0, 1.0)  # Blue
+            scripted_color = (1.0, 0.0, 0.0, 1.0)  # Pure blue (R=0.0, G=0.0, B=1.0)
+            print(f"    Scripted color (RGBA): {scripted_color}")
             scripted_spheres = draw_vertex_points(
                 mesh, 
                 vertices_data['scripted'], 
                 scripted_color, 
                 point_size=point_size,
-                name_prefix="scripted"
+                name_prefix="scripted",
+                is_first_frame=is_first_frame
             )
-            print(f"    Drew {len(scripted_spheres)} scripted vertices (blue)")
+            print(f"    Drew {len(scripted_spheres)} scripted sphere(s) in pure blue")
+        
+        # Draw pinned vertices in red
+        if vertices_data['pinned']:
+            pinned_color = (1.0, 1.0, 0.0, 1.0)  # Pure red (R=1.0, G=0.0, B=0.0)
+            print(f"    Pinned color (RGBA): {pinned_color}")
+            pinned_spheres = draw_vertex_points(
+                mesh, 
+                vertices_data['pinned'], 
+                pinned_color, 
+                point_size=2 * point_size,
+                name_prefix="pinned",
+                is_first_frame=is_first_frame
+            )
+            print(f"    Drew {len(pinned_spheres)} pinned sphere(s) in pure red")
     
     # Camera (fixed position and rotation using direct Blender API)
     bpy.ops.object.camera_add(location=camera_location)

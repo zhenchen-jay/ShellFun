@@ -43,7 +43,7 @@ def parse_half_cylinder_render_arguments():
     parser.add_argument('--focal-length', type=float, default=45.0,
                         help='Camera focal length in mm (default: 45.0)')
     parser.add_argument('--flat-shading', action='store_true', help="Whether to use flat shading", default=False)
-    parser.add_argument('--edge-thickness', type=float, help="Edge thickness (default: 0.0001)", default=0.0001)
+    parser.add_argument('--edge-thickness', type=float, help="Edge thickness (default: 0.0004)", default=0.0004)
     
     if '--' in sys.argv:
         args = parser.parse_args(sys.argv[sys.argv.index('--') + 1:])
@@ -121,8 +121,8 @@ def main():
     print(f"{'='*50}")
     
      # Fixed camera position and rotation
-    camera_location = (-0.11, -0.16, 0.13)
-    camera_rotation = (50, 0, -50)  # Euler rotation in degrees
+    camera_location = (0, 0.1, 0.6)
+    camera_rotation = (-27, 0, 0)  # Euler rotation in degrees
     
     print(f"  Camera location: {camera_location}")
     print(f"  Camera rotation: {camera_rotation}")
@@ -132,7 +132,7 @@ def main():
     # Light settings (fixed)
     # ========================================
     # Sun light with fixed rotation
-    light_rotation = (0, 0, 0)  # Euler rotation in degrees
+    light_rotation = (270, 0, 0)  # Euler rotation in degrees
     light_location = (0, 0, 0)
     light_strength = 2.0
     shadow_softness = 0.3
